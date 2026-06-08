@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Default-deny Catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- REUSABLE SECURITY DEFINITIONS ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'himanshu712007@gmail.com' ||
+        request.auth.uid == 'DjQkzY4U4Tb5xLmOyywopbVC8453' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function getUserRole() {
+      return exists(/databases/$(database)/documents/profiles/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role
+        : 'Customer';
+    }
+
+    function isRider() {
+      return isSignedIn() && (
+        getUserRole() == 'Rider' ||
+        exists(/databases/$(database)/documents/riders/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // --- VALIDATION BLUEPRINTS ---
+
+    function isValidUserProfile(data) {
+      return data.userId is string && data.userId.size() <= 128
+          && data.name is string && data.name.size() <= 200
+          && data.email is string && data.email.size() <= 200
+          && data.phone is string && data.phone.size() <= 50
+          && data.role is string && (data.role == 'Customer' || data.role == 'Rider' || data.role == 'Admin');
+    }
+
+    function isValidOrder(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.userId is string && data.userId.size() <= 128
+          && data.total is number && data.total >= 0
+          && data.status is string && (
+            data.status == 'placed' ||
+            data.status == 'confirmed' ||
+            data.status == 'packed' ||
+            data.status == 'out_for_delivery' ||
+            data.status == 'delivered' ||
+            data.status == 'cancelled'
+          );
+    }
+
+    function isValidRider(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.name is string && data.name.size() <= 200
+          && data.phone is string && data.phone.size() <= 50
+          && data.email is string && data.email.size() <= 200
+          && data.vehicleNumber is string && data.vehicleNumber.size() <= 100;
+    }
+
+    // --- COLLECTION RULES MATCHERS ---
+
+    // 1. User profile collection
+    match /profiles/{userId} {
+      allow read, create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
+    // 2. Orders collection
+    match /orders/{orderId} {
+      allow read, create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+    
+    // 3. Admin list definitions
+    match /admins/{uid} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    
+    // 4. Riders register list
+    match /riders/{uid} {
+      allow read, create, update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+  }
+}

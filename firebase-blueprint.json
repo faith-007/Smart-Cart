@@ -1,0 +1,190 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Information stored for each registered customer",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Unique auth-derived user identifier"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["Admin", "Rider", "Customer"],
+          "description": "Role assigned to the user for access control"
+        },
+        "name": {
+          "type": "string",
+          "description": "User's full name"
+        },
+        "email": {
+          "type": "string",
+          "description": "User's contact email"
+        },
+        "phone": {
+          "type": "string",
+          "description": "User's mobile phone number"
+        },
+        "last_login": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the user's last login session"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when the user account was created"
+        },
+        "addresses": {
+          "type": "array",
+          "description": "List of delivery addresses saved by the user"
+        }
+      },
+      "required": ["userId", "name", "email"]
+    },
+    "Order": {
+      "title": "Purchase Order",
+      "description": "A grocery procurement procurement order containing items and real-time delivery state",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for this order"
+        },
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who placed this order"
+        },
+        "userEmail": {
+          "type": "string",
+          "description": "The email of the user who placed this order"
+        },
+        "date": {
+          "type": "string",
+          "description": "User-facing purchase ISO date"
+        },
+        "items": {
+          "type": "array",
+          "description": "List of cart items included in the order"
+        },
+        "subtotal": {
+          "type": "number",
+          "description": "Item subtotal cost before discounts or delivery"
+        },
+        "discount": {
+          "type": "number",
+          "description": "Discount applied from matching promo campaigns"
+        },
+        "deliveryCharge": {
+          "type": "number",
+          "description": "Delivery dispatch fee"
+        },
+        "total": {
+          "type": "number",
+          "description": "Final sum charged"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["placed", "confirmed", "packed", "out_for_delivery", "delivered", "cancelled"],
+          "description": "Current dispatch and transition stage of the order"
+        },
+        "address": {
+          "type": "string",
+          "description": "Exact text shipping address"
+        },
+        "paymentMethod": {
+          "type": "string",
+          "description": "Chosen payment route (e.g. UPI, cash, cards)"
+        },
+        "eta": {
+          "type": "number",
+          "description": "Estimated minutes until arrival"
+        },
+        "deliveryPartner": {
+          "type": "object",
+          "description": "Current rider or delivery agent details if assigned"
+        }
+      },
+      "required": ["id", "userId", "items", "total", "status"]
+    },
+    "Rider": {
+      "title": "Delivery Rider Partner",
+      "description": "An administrative delivery agent account created and assigned by Admin managers",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique rider identifier"
+        },
+        "name": {
+          "type": "string",
+          "description": "Rider's full name"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Rider's mobile contact number"
+        },
+        "email": {
+          "type": "string",
+          "description": "Rider's registered email address"
+        },
+        "password": {
+          "type": "string",
+          "description": "Rider's secure 6-digit access numeric PIN"
+        },
+        "vehicleNumber": {
+          "type": "string",
+          "description": "Courier vehicle license number"
+        },
+        "isActiveOnDuty": {
+          "type": "boolean",
+          "description": "Whether current rider is active on shift duty"
+        },
+        "lat": {
+          "type": "number",
+          "description": "Current latitudinal GPS coordinate of the courier"
+        },
+        "lng": {
+          "type": "number",
+          "description": "Current longitudinal GPS coordinate of the courier"
+        },
+        "battery": {
+          "type": "string",
+          "description": "Current battery charge state percentage of rider's tracker device"
+        },
+        "avatar": {
+          "type": "string",
+          "description": "Photo URL of the rider partner"
+        },
+        "completedDeliveries": {
+          "type": "number",
+          "description": "Total successfully finalized deliveries count"
+        },
+        "activeDeliveries": {
+          "type": "number",
+          "description": "Count of orders currently being delivered by this partner"
+        },
+        "avgDeliveryTime": {
+          "type": "number",
+          "description": "Average minutes to fulfill an assigned delivery"
+        }
+      },
+      "required": ["id", "name", "phone", "email", "password", "vehicleNumber"]
+    }
+  },
+  "firestore": {
+    "/profiles/{userId}": {
+      "schema": "UserProfile",
+      "description": "Collection storing basic user profiles keyed by their Firebase Auth UID"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Collection storing all customer orders"
+    },
+    "/riders/{riderId}": {
+      "schema": "Rider",
+      "description": "Collection storing all admin created rider accounts"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "SmartCart",
+  "description": "A 15-minute grocery delivery website for purchasing fresh fruits, vegetables, snacks, and daily essentials with real-time tracking.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
