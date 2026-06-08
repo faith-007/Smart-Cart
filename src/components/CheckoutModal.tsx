@@ -37,7 +37,7 @@ export default function CheckoutModal({
   const [isDetecting, setIsDetecting] = useState(false);
 
   // Payment State
-  const [payMethod, setPayMethod] = useState("UPI (Instantly Verified)");
+  const [payMethod, setPayMethod] = useState("Cash on Delivery (COD)");
   const [upiId, setUpiId] = useState("");
   const [paymentError, setPaymentError] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -143,11 +143,13 @@ export default function CheckoutModal({
       label: "Unified Payments Interface (UPI)",
       value: "UPI (Instantly Verified)",
       description: "Pay securely with instant verification via Google Pay, PhonePe, or Paytm",
+      isComingSoon: true,
     },
     {
       label: "Cash on Delivery / POD",
       value: "Cash on Delivery (COD)",
       description: "Pay with Cash or scan QR code on parcel handoff",
+      isComingSoon: false,
     },
   ];
 
@@ -442,7 +444,14 @@ export default function CheckoutModal({
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-gray-800">{method.label}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black text-gray-800">{method.label}</span>
+                          {method.isComingSoon && (
+                            <span id="upi-coming-soon-badge-list" className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 border border-amber-250 text-amber-600 font-sans tracking-wide">
+                              Coming Soon
+                            </span>
+                          )}
+                        </div>
                         <div
                           className={`h-4.5 w-4.5 rounded-full border flex items-center justify-center ${
                             isSelected ? "border-green-500" : "border-gray-300"
@@ -463,17 +472,32 @@ export default function CheckoutModal({
                   <h4 className="text-[11px] font-black text-gray-450 uppercase mb-2 font-sans">Payment Details</h4>
 
                   {payMethod.startsWith("UPI") ? (
-                    <div className="space-y-2.5">
-                      <p className="text-[11px] text-gray-500 leading-normal">Enter your UPI VPA to pay securely using BHIM, GPay, or Paytm.</p>
-                      <div>
+                    <div className="space-y-3">
+                      {/* PROFESSIONALLY STYLED COMING SOON BADGE */}
+                      <div id="upi-coming-soon-pill" className="inline-flex items-center gap-1 bg-amber-50 border border-amber-100/70 text-amber-700 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-wider font-sans leading-none">
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                        Coming Soon
+                      </div>
+
+                      {/* DETAILED INFORMATIONAL MESSAGE */}
+                      <p className="text-[11px] text-amber-800 font-semibold bg-amber-50/30 border border-amber-100/25 p-2 rounded-lg leading-relaxed">
+                        UPI payments will be available soon. Please use Cash on Delivery for now.
+                      </p>
+
+                      {/* FUTURE UPI INTEGRATION POINT: 
+                          To integrate real UPI payment processing in the future:
+                          1. Integrate a payment gateway like Razorpay Standard Checkout or PhonePe SDK.
+                          2. Validate user VPA format strictly.
+                          3. Submit dynamic UPI intent payload to backend server.ts route.
+                      */}
+                      <div className="opacity-40 pointer-events-none select-none">
                         <label className="text-[9px] font-bold text-gray-400 uppercase">UPI Address (VPA)</label>
                         <input
                           type="text"
-                          required
-                          className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold placeholder-gray-400 outline-hidden focus:border-green-500"
-                          placeholder="e.g. user@okaxis"
+                          disabled
+                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs font-semibold placeholder-gray-400 outline-hidden"
+                          placeholder="disabled"
                           value={upiId}
-                          onChange={(e) => setUpiId(e.target.value)}
                         />
                       </div>
                     </div>
@@ -522,14 +546,18 @@ export default function CheckoutModal({
               </button>
 
               <button
-                disabled={isProcessing || !selectedAddress}
+                disabled={isProcessing || !selectedAddress || payMethod !== "Cash on Delivery (COD)"}
                 onClick={handleTriggerPayment}
-                className="flex items-center space-x-2 rounded-xl bg-green-500 text-white px-6 py-3 font-black text-xs hover:bg-green-600 transition shadow-lg shadow-green-100 disabled:opacity-50 cursor-pointer"
+                className="flex items-center space-x-2 rounded-xl bg-green-500 text-white px-6 py-3 font-black text-xs hover:bg-green-600 transition shadow-lg shadow-green-100 disabled:opacity-50 disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed cursor-pointer"
               >
                 {isProcessing ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     <span>Processing Securely...</span>
+                  </>
+                ) : payMethod.startsWith("UPI") ? (
+                  <>
+                    <span>UPI Option Disabled (Use COD)</span>
                   </>
                 ) : (
                   <>
