@@ -173,7 +173,7 @@ export default function UserProfile({
 
     try {
       console.log(`[SmartCart Auth] Resending secure SMTP registration code to ${email}...`);
-      const response = await fetch("/api/send-otp", {
+      const response = await fetch("/.netlify/functions/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, otp: generatedCode, name: nameInput.trim(), isResend: true }),
