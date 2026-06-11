@@ -1,6 +1,5 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import nodemailer from "nodemailer";
 
@@ -55,8 +54,11 @@ async function sendSmtpEmail({ to, subject, html, text }: { to: string; subject:
   });
 }
 
+// Create API router to easily support both local development and Netlify/Vercel serverless custom path mappings
+const apiRouter = express.Router();
+
 // SMTP route to dispatch OTP code during user registration
-app.post("/api/send-otp", async (req, res) => {
+apiRouter.post("/send-otp", async (req, res) => {
   const { email, otp, name, isResend } = req.body;
 
   if (!email || !otp) {
@@ -121,7 +123,7 @@ app.post("/api/send-otp", async (req, res) => {
 });
 
 // SMTP route to handle password reset/change notifications
-app.post("/api/send-password-reset", async (req, res) => {
+apiRouter.post("/send-password-reset", async (req, res) => {
   const { email, userName } = req.body;
 
   if (!email) {
@@ -172,7 +174,7 @@ app.post("/api/send-password-reset", async (req, res) => {
 });
 
 // SMTP route to handle detailed order confirmation emails
-app.post("/api/send-order-confirmation", async (req, res) => {
+apiRouter.post("/send-order-confirmation", async (req, res) => {
   const { email, order } = req.body;
 
   if (!email || !order) {
@@ -290,6 +292,12 @@ app.post("/api/send-order-confirmation", async (req, res) => {
 });
 
 
+// Register API router under multiple path prefixes to handle Netlify's serverless function rewrites and standard Express
+app.use("/api", apiRouter);
+app.use("/.netlify/functions/api", apiRouter);
+app.use("/", apiRouter);
+
+
 const isServerless = process.env.VERCEL === "1" || process.env.NETLIFY === "true" || !!process.env.LAMBDA_TASK_ROOT;
 
 async function startServer() {
@@ -301,6 +309,7 @@ async function startServer() {
   // Vite integration middleware
   if (process.env.NODE_ENV !== "production") {
     console.log("[SmartCart Server] Starting Express backend with Vite HMR middleware...");
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
