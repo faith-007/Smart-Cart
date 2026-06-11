@@ -290,7 +290,14 @@ app.post("/api/send-order-confirmation", async (req, res) => {
 });
 
 
+const isServerless = process.env.VERCEL === "1" || process.env.NETLIFY === "true" || !!process.env.LAMBDA_TASK_ROOT;
+
 async function startServer() {
+  if (isServerless) {
+    console.log("[SmartCart Server] Serverless environment detected. Skipping listen port and static SPA middleware.");
+    return;
+  }
+
   // Vite integration middleware
   if (process.env.NODE_ENV !== "production") {
     console.log("[SmartCart Server] Starting Express backend with Vite HMR middleware...");
@@ -308,13 +315,9 @@ async function startServer() {
     });
   }
 
-  if (process.env.VERCEL !== "1") {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`[SmartCart Server] Server is running on http://localhost:${PORT}`);
-    });
-  } else {
-    console.log("[SmartCart Server] Vercel environment detected. Serverless routing active.");
-  }
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`[SmartCart Server] Server is running on http://localhost:${PORT}`);
+  });
 }
 
 startServer();
