@@ -31,61 +31,54 @@ export default function OrderTracking({
   onAssignPartnerToOrder,
 }: OrderTrackingProps) {
   const [etaTimer, setEtaTimer] = useState(12);
+  const [showConfirmCancel, setShowConfirmCancel] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Auto-progress stages simulator (advances every 20 seconds)
+  const getNormalizedStatus = (status?: Order["status"]): Order["status"] => {
+    if (!status) return "placed";
+    if (status === "accepted") return "confirmed";
+    return status;
+  };
+
+  // Reactively set ETA timer based on actual live order status changes
   useEffect(() => {
-    if (!isOpen || !order || order.status === "delivered") return;
-
-    const timer = setInterval(() => {
-      const currentIdx = STAGES.findIndex((s) => s.status === order?.status);
-      if (currentIdx < STAGES.length - 1) {
-        const nextStatus = STAGES[currentIdx + 1].status;
-        
-        // Prevent auto-progressing to delivery stage if no rider is assigned yet
-        if ((nextStatus === "out_for_delivery" || nextStatus === "delivered") && !order.deliveryPartner) {
-          return;
-        }
-
-        onUpdateOrderStatus(order.id, nextStatus);
-
-        // Adjust mock timer
-        setEtaTimer((prev) => Math.max(0, prev - 3));
-      }
-    }, 20000); // 20s auto skip
-
-    return () => clearInterval(timer);
-  }, [isOpen, order?.status, order?.id, order?.deliveryPartner, onUpdateOrderStatus]);
+    if (order) {
+      const status = order.status;
+      if (status === "placed") setEtaTimer(25);
+      else if (status === "confirmed" || status === "accepted") setEtaTimer(20);
+      else if (status === "packed") setEtaTimer(15);
+      else if (status === "out_for_delivery") setEtaTimer(8);
+      else if (status === "delivered") setEtaTimer(0);
+    }
+  }, [order?.status]);
 
   if (!isOpen || !order) return null;
 
   const isCancelled = order.status === "cancelled";
 
   // Find active stage index
-  const activeIdx = isCancelled ? 0 : STAGES.findIndex((s) => s.status === order.status);
+  const activeIdx = isCancelled ? 0 : STAGES.findIndex((s) => s.status === getNormalizedStatus(order.status));
 
-  // Handle manual skip for fast testing
-  const triggerManualNextStep = () => {
-    if (!order || isCancelled) return;
-    const currentIdx = STAGES.findIndex((s) => s.status === order.status);
-    if (currentIdx < STAGES.length - 1) {
-      const nextStatus = STAGES[currentIdx + 1].status;
-      
-      // Prevent manual speed-up into dispatch / delivery stages if no partner is assigned
-      if ((nextStatus === "out_for_delivery" || nextStatus === "delivered") && !order.deliveryPartner) {
-        alert("Rider assignment is pending! To simulate delivery, please log in to the Rider Portal (from the footer) to accept the request, or allocate a rider manually in the Admin Portal.");
-        return;
-      }
+  const cancelOrder = () => {
+    console.log("[SmartCart Debug] Button Clicked: Cancel button clicked in OrderTracking for order ID:", order?.id);
+    console.log("[SmartCart Debug] Cancel Function Started for order ID:", order?.id);
+    if (!order) return;
 
-      onUpdateOrderStatus(order.id, nextStatus);
-      setEtaTimer((prev) => Math.max(0, prev - 3));
+    if (order.status !== "placed") {
+      console.log("[SmartCart Debug] Cancel Action Blocked: Status is not 'placed'", order.status);
+      setErrorMessage("Only orders in 'placed' status can be cancelled.");
+      return;
     }
+
+    setShowConfirmCancel(true);
   };
 
   // Live progress percentage calculation
   const progressPercent = isCancelled ? 0 : ((activeIdx) / (STAGES.length - 1)) * 100;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in text-left">
       
       {/* Tracker Card */}
       <div 
@@ -96,7 +89,7 @@ export default function OrderTracking({
         {/* Close Switch */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition"
+          className="absolute top-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition cursor-pointer"
         >
           <X className="h-5 w-5" />
         </button>
@@ -113,7 +106,7 @@ export default function OrderTracking({
 
         {/* ETA Header dashboard */}
         {isCancelled ? (
-          <div className="my-5 bg-gradient-to-r from-red-500 to-red-650 rounded-2xl p-4 text-white flex flex-col sm:flex-row items-center sm:justify-between gap-3 text-left shadow-lg shadow-red-100">
+          <div className="my-5 bg-gradient-to-r from-red-500 to-red-650 rounded-2xl p-4 text-white flex flex-col sm:flex-row items-center sm:justify-between gap-3 text-left shadow-lg shadow-red-100 animate-in zoom-in-95 duration-200">
             <div className="flex items-center space-x-3.5">
               <div className="h-12 w-12 bg-white/15 rounded-xl flex items-center justify-center shrink-0">
                 <ShieldAlert className="h-6 w-6 text-yellow-300 animate-bounce" />
@@ -149,16 +142,18 @@ export default function OrderTracking({
               </div>
             </div>
             
-            {/* Quick simulator trigger details */}
-            <div className="flex flex-col items-center sm:items-end">
-              <p className="text-[9px] text-green-100 font-bold mb-1.5 uppercase">Test Delivery Stage</p>
-              <button
-                onClick={triggerManualNextStep}
-                disabled={order.status === "delivered"}
-                className="rounded-xl bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-black text-[10px] uppercase p-2 border-none transition active:scale-95 disabled:bg-gray-100/10 disabled:text-gray-400 disabled:cursor-not-allowed cursor-pointer"
-              >
-                ⚡ Speed Up Rider
-              </button>
+            {/* Customer Actions */}
+            <div className="flex flex-col items-center sm:items-end justify-center">
+              {order.status === "placed" && (
+                <button
+                  id={`smartcart-cancel-button-tracking-${order.id}`}
+                  onClick={cancelOrder}
+                  className="group relative flex items-center gap-2 overflow-hidden rounded-xl border-2 border-red-100 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 px-4 py-2.5 font-extrabold text-[11px] uppercase tracking-wider transition-all duration-300 hover:border-red-300 hover:shadow-sm active:scale-95 cursor-pointer"
+                >
+                  <X className="h-4 w-4 text-red-500 group-hover:rotate-90 transition-transform duration-300" />
+                  <span>Cancel Order</span>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -228,7 +223,7 @@ export default function OrderTracking({
                 {/* Node circle */}
                 <div className={`flex h-7.5 w-7.5 shrink-0 items-center justify-center rounded-full border-2 transition ${
                   isCompleted 
-                    ? "bg-green-500 border-green-500 text-white" 
+                    ? "bg-green-500 border-green-550 text-white bg-green-500" 
                     : isActive 
                       ? "border-green-500 text-green-600 animate-pulse bg-white" 
                       : "border-gray-250 text-gray-400 bg-white"
@@ -278,9 +273,9 @@ export default function OrderTracking({
               href={`tel:${order.deliveryPartner.phone}`}
               onClick={(e) => {
                 e.preventDefault();
-                alert(`Calling delivery agent ${order.deliveryPartner?.name} at simulated phone line ${order.deliveryPartner?.phone}`);
+                setSuccessMessage(`Calling delivery agent ${order.deliveryPartner?.name} at simulated phone line ${order.deliveryPartner?.phone}`);
               }}
-              className="flex items-center space-x-2 shrink-0 rounded-xl bg-orange-500 hover:bg-orange-600 px-4 py-2 text-white font-bold text-xs shadow-xs transition"
+              className="flex items-center space-x-2 shrink-0 rounded-xl bg-orange-500 hover:bg-orange-600 px-4 py-2 text-white font-bold text-xs shadow-xs transition cursor-pointer"
             >
               <Phone className="h-4 w-4" />
               <span>Call Rider Partner</span>
@@ -307,6 +302,88 @@ export default function OrderTracking({
         )}
 
       </div>
+
+      {/* CONFIRM ORDER CANCELLATION OVERLAY */}
+      {showConfirmCancel && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 backdrop-blur-xs p-4 animate-fade-in text-left">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 flex flex-col items-center text-center">
+            <div className="h-12 w-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4">
+              <span className="text-xl font-bold">!</span>
+            </div>
+            <h3 className="text-base font-black text-gray-900 uppercase tracking-tight mb-2">Cancel Active Order</h3>
+            <p className="text-xs text-gray-400 font-semibold mb-1">ORDER ID: {order.id}</p>
+            <p className="text-xs text-gray-500 leading-relaxed mb-6 font-medium p-1">
+              Are you sure you want to cancel this order? This action will immediately retract rider assignments and delete any currently active tracking beacons.
+            </p>
+            <div className="flex items-center gap-3 w-full">
+              <button
+                type="button"
+                onClick={() => setShowConfirmCancel(false)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-750 font-bold text-xs rounded-xl transition uppercase tracking-wider cursor-pointer"
+              >
+                Keep Order
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  console.log("[SmartCart Debug] Confirmation Success: Dispatching status change to 'cancelled'...");
+                  onUpdateOrderStatus(order.id, "cancelled");
+                  setShowConfirmCancel(false);
+                  onClose();
+                }}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs rounded-xl shadow-md uppercase tracking-wider transition cursor-pointer"
+              >
+                Cancel Order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ERROR MESSAGE OVERLAY */}
+      {errorMessage && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 backdrop-blur-xs p-4 animate-fade-in text-left">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 flex flex-col items-center text-center">
+            <div className="h-12 w-12 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center mb-4">
+              <span className="text-xl font-bold">i</span>
+            </div>
+            <h3 className="text-base font-black text-gray-900 uppercase tracking-tight mb-2">Action Blocked</h3>
+            <p className="text-xs text-gray-550 leading-relaxed mb-6 font-medium">
+              {errorMessage}
+            </p>
+            <button
+              type="button"
+              onClick={() => setErrorMessage(null)}
+              className="w-full py-2.5 bg-gray-900 hover:bg-gray-800 text-white font-bold text-xs rounded-xl transition uppercase tracking-wider cursor-pointer"
+            >
+              Okay
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* SUCCESS SIMULATOR OVERLAY */}
+      {successMessage && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 backdrop-blur-xs p-4 animate-fade-in text-left">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 flex flex-col items-center text-center">
+            <div className="h-12 w-12 bg-green-50 text-green-500 rounded-full flex items-center justify-center mb-4 animate-pulse">
+              <Phone className="h-5 w-5" />
+            </div>
+            <h3 className="text-base font-black text-gray-900 uppercase tracking-tight mb-2">Simulated Call Dispatch</h3>
+            <p className="text-xs text-gray-550 leading-relaxed mb-6 font-medium">
+              {successMessage}
+            </p>
+            <button
+              type="button"
+              onClick={() => setSuccessMessage(null)}
+              className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold text-xs rounded-xl transition uppercase tracking-wider cursor-pointer"
+            >
+              Close Line
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

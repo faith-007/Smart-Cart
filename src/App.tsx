@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { INITIAL_CATEGORIES, INITIAL_PRODUCTS, PROMO_CODES } from "./data";
-import { Product, Category, CartItem, Address, Order, PromoCode, Rider } from "./types";
+import { INITIAL_CATEGORIES, INITIAL_PRODUCTS } from "./data";
+import { Product, Category, CartItem, Address, Order, Rider } from "./types";
+import { calculatePricing } from "./lib/pricing";
 
 // Component Imports
 import Header from "./components/Header";
@@ -15,7 +16,20 @@ import UserProfile from "./components/UserProfile";
 import AdminPanel from "./components/AdminPanel";
 import RiderDashboard from "./components/RiderDashboard";
 import LocationOnboardingModal from "./components/LocationOnboardingModal";
-import { syncOrderToFirebase, fetchOrdersFromFirebase, auth, fetchRidersFromFirebase, syncRiderToFirebase, fetchUserProfileFromFirebase } from "./lib/firebase";
+import { 
+  syncOrderToFirebase, 
+  fetchOrdersFromFirebase, 
+  auth, 
+  fetchRidersFromFirebase, 
+  syncRiderToFirebase, 
+  fetchUserProfileFromFirebase,
+  fetchSavedAddressesFromFirebase,
+  saveAddressToFirebase,
+  deleteAddressFromFirebase,
+  setDefaultAddressInFirebase,
+  syncUserProfileToFirebase,
+  clearAllAddressesFromFirebase
+} from "./lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 
 // Icons for general UI
@@ -43,7 +57,6 @@ export default function App() {
 
   // --- Order States ---
   const [orders, setOrders] = useState<Order[]>([]);
-  const [appliedPromo, setAppliedPromo] = useState<PromoCode | null>(null);
 
   // --- Rider Database State ---
   const [riders, setRiders] = useState<Rider[]>(() => {
@@ -309,30 +322,38 @@ export default function App() {
   // Load cart, wishlist, addresses, and orders on boot (with real-time Supabase sync)
   useEffect(() => {
     try {
-      const savedCart = localStorage.getItem("smartcart_cart");
-      if (savedCart) setCart(JSON.parse(savedCart));
-
-      const savedWishlist = localStorage.getItem("smartcart_wishlist");
-      if (savedWishlist) setWishlist(JSON.parse(savedWishlist));
-
       const loggedIn = localStorage.getItem("smartcart_customer_logged_in") === "true";
+      let finalCartKey = "smartcart_cart_anonymous";
+      let finalWishlistKey = "smartcart_wishlist_anonymous";
+
       if (loggedIn) {
         setIsCustomerLoggedIn(true);
-        setUserName(localStorage.getItem("smartcart_customer_name") || "");
-        setUserPhone(localStorage.getItem("smartcart_customer_phone") || "");
-        setUserEmail(localStorage.getItem("smartcart_customer_email") || "");
+        const name = localStorage.getItem("smartcart_customer_name") || "";
+        const phone = localStorage.getItem("smartcart_customer_phone") || "";
+        const email = localStorage.getItem("smartcart_customer_email") || "";
+        setUserName(name);
+        setUserPhone(phone);
+        setUserEmail(email);
+
+        const currentUid = localStorage.getItem("smartcart_current_uid");
+        if (currentUid) {
+          finalCartKey = `smartcart_cart_${currentUid}`;
+          finalWishlistKey = `smartcart_wishlist_${currentUid}`;
+        } else if (email) {
+          finalCartKey = `smartcart_cart_sim_${email.replace(/[@.]/g, "_")}`;
+          finalWishlistKey = `smartcart_wishlist_sim_${email.replace(/[@.]/g, "_")}`;
+        } else if (phone) {
+          finalCartKey = `smartcart_cart_sim_${phone.replace(/\D/g, "")}`;
+          finalWishlistKey = `smartcart_wishlist_sim_${phone.replace(/\D/g, "")}`;
+        }
         
         const savedAddrs = localStorage.getItem("smartcart_addresses");
         if (savedAddrs) {
           const parsed = JSON.parse(savedAddrs);
           setSavedAddresses(parsed);
           if (parsed.length > 0) {
-            setCurrentAddress(parsed[0]);
-          } else {
-            setShowLocationOnboarding(true);
+            setCurrentAddress(parsed.find((a: any) => a.isDefault) || parsed[0]);
           }
-        } else {
-          setShowLocationOnboarding(true);
         }
       } else {
         setIsCustomerLoggedIn(false);
@@ -342,6 +363,13 @@ export default function App() {
         setSavedAddresses([]);
         setCurrentAddress(null);
       }
+
+      const savedCart = localStorage.getItem(finalCartKey) || localStorage.getItem("smartcart_cart");
+      if (savedCart) setCart(JSON.parse(savedCart));
+
+      const savedWishlist = localStorage.getItem(finalWishlistKey) || localStorage.getItem("smartcart_wishlist");
+      if (savedWishlist) setWishlist(JSON.parse(savedWishlist));
+
     } catch (e) {
       console.error("Failed to load persisted localStorage states", e);
     }
@@ -456,11 +484,58 @@ export default function App() {
     return "smartcart_orders_anonymous";
   };
 
+  const getCartStorageKey = () => {
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      return `smartcart_cart_${currentUser.uid}`;
+    }
+    if (isCustomerLoggedIn) {
+      if (userEmail) {
+        return `smartcart_cart_sim_${userEmail.replace(/[@.]/g, "_")}`;
+      }
+      if (userPhone) {
+        return `smartcart_cart_sim_${userPhone.replace(/\D/g, "")}`;
+      }
+    }
+    return "smartcart_cart_anonymous";
+  };
+
+  const getWishlistStorageKey = () => {
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      return `smartcart_wishlist_${currentUser.uid}`;
+    }
+    if (isCustomerLoggedIn) {
+      if (userEmail) {
+        return `smartcart_wishlist_sim_${userEmail.replace(/[@.]/g, "_")}`;
+      }
+      if (userPhone) {
+        return `smartcart_wishlist_sim_${userPhone.replace(/\D/g, "")}`;
+      }
+    }
+    return "smartcart_wishlist_anonymous";
+  };
+
   // Sync auth state observer
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         console.log("[SmartCart] Auth state synchronized: User logged in", firebaseUser.email);
+        
+        // Safeguard state boundary: if user switches, zero/purge old details to block leakage
+        if (localStorage.getItem("smartcart_current_uid") !== firebaseUser.uid) {
+          setUserName("");
+          setUserPhone("");
+          setUserEmail("");
+          setSavedAddresses([]);
+          setCurrentAddress(null);
+          setOrders([]);
+          localStorage.removeItem("smartcart_customer_name");
+          localStorage.removeItem("smartcart_customer_phone");
+          localStorage.removeItem("smartcart_customer_email");
+          localStorage.removeItem("smartcart_addresses");
+        }
+        localStorage.setItem("smartcart_current_uid", firebaseUser.uid);
         
         let profileRole: "Admin" | "Rider" | "Customer" | "Guest" = "Customer";
         let loadedProfile: any = null;
@@ -484,7 +559,21 @@ export default function App() {
         const finalName = loadedProfile?.name || firebaseUser.displayName || "Customer";
         const finalEmail = loadedProfile?.email || firebaseUser.email || "";
         const finalPhone = loadedProfile?.phone || "";
-        const finalAddresses = loadedProfile?.addresses || [];
+        
+        let finalAddresses = [];
+        try {
+          finalAddresses = await fetchSavedAddressesFromFirebase(firebaseUser.uid);
+          if (finalAddresses.length === 0 && loadedProfile?.addresses && loadedProfile.addresses.length > 0) {
+            console.log("[SmartCart addresses] Migrating legacy addresses to Firestore subcollection...");
+            for (const addr of loadedProfile.addresses) {
+              await saveAddressToFirebase(firebaseUser.uid, addr, !!addr.isDefault);
+            }
+            finalAddresses = await fetchSavedAddressesFromFirebase(firebaseUser.uid);
+          }
+        } catch (e) {
+          console.error("Error fetching/migrating addresses on login:", e, firebaseUser.uid);
+          finalAddresses = loadedProfile?.addresses || [];
+        }
 
         setIsCustomerLoggedIn(true);
         setUserRole(profileRole);
@@ -493,9 +582,13 @@ export default function App() {
         setUserPhone(finalPhone);
         setSavedAddresses(finalAddresses);
         if (finalAddresses.length > 0) {
-          setCurrentAddress(finalAddresses[0]);
+          const defaultAddr = finalAddresses.find(a => a.isDefault === true) || finalAddresses[0];
+          setCurrentAddress(defaultAddr);
+          setShowLocationOnboarding(false);
         } else {
           setCurrentAddress(null);
+          // Do not automatically pop up location onboarding on the starting page of the website
+          setShowLocationOnboarding(false);
         }
 
         localStorage.setItem("smartcart_customer_logged_in", "true");
@@ -503,6 +596,23 @@ export default function App() {
         localStorage.setItem("smartcart_customer_email", finalEmail);
         localStorage.setItem("smartcart_customer_phone", finalPhone);
         localStorage.setItem("smartcart_addresses", JSON.stringify(finalAddresses));
+
+        // Load isolated cart and wishlist (Security Isolation Audit)
+        const cartKey = `smartcart_cart_${firebaseUser.uid}`;
+        const savedCart = localStorage.getItem(cartKey);
+        if (savedCart) {
+          setCart(JSON.parse(savedCart));
+        } else {
+          setCart([]);
+        }
+
+        const wishlistKey = `smartcart_wishlist_${firebaseUser.uid}`;
+        const savedWishlist = localStorage.getItem(wishlistKey);
+        if (savedWishlist) {
+          setWishlist(JSON.parse(savedWishlist));
+        } else {
+          setWishlist([]);
+        }
 
         // Fetch dynamic key for current user
         const dynamicKey = `smartcart_orders_${firebaseUser.uid}`;
@@ -536,6 +646,14 @@ export default function App() {
         setSavedAddresses([]);
         setCurrentAddress(null);
         setOrders([]);
+        localStorage.removeItem("smartcart_current_uid");
+
+        // Load anonymous/guest cart and wishlist safely (Security Isolation Audit)
+        const savedCartDef = localStorage.getItem("smartcart_cart_anonymous");
+        setCart(savedCartDef ? JSON.parse(savedCartDef) : []);
+
+        const savedWishlistDef = localStorage.getItem("smartcart_wishlist_anonymous");
+        setWishlist(savedWishlistDef ? JSON.parse(savedWishlistDef) : []);
       }
     });
     return () => unsubscribe();
@@ -552,20 +670,53 @@ export default function App() {
         const isAdminRole = userRole === "Admin" || activeTab === "admin";
         if (!currentUser && !isCustomerLoggedIn && !isRiderRole && !isAdminRole) return;
 
-        // Admin and Rider only poll for all orders, Customers only query their own
-        const queryAll = isAdminRole || isRiderRole;
+        console.log("[SmartCart Debug] Realtime Sync Triggered: Background synchronization tick initiated.");
+
+        // Admin only poll for all orders, Customers and Riders use secure scoped queries
+        const queryAll = isAdminRole;
         
-        const dbOrders = await fetchOrdersFromFirebase(userRole || (isRiderRole ? "Rider" : "Customer"), queryAll);
+        const effectiveRole = isAdminRole ? "Admin" : (isRiderRole ? "Rider" : "Customer");
+        const dbOrders = await fetchOrdersFromFirebase(effectiveRole, queryAll);
         if (dbOrders && active) {
+          let merged: Order[] = [];
           setOrders((prevOrders) => {
-            // Keep state updated matching the database
-            return dbOrders;
+            const mergedMap = new Map<string, Order>();
+            
+            dbOrders.forEach((dbO) => {
+              mergedMap.set(dbO.id, dbO);
+            });
+            
+            prevOrders.forEach((localO) => {
+              const dbO = mergedMap.get(localO.id);
+              if (dbO) {
+                if (localO.status === "cancelled" && dbO.status !== "cancelled") {
+                  mergedMap.set(localO.id, {
+                    ...dbO,
+                    status: "cancelled",
+                    delivery_status: "cancelled",
+                    cancelledAt: localO.cancelledAt,
+                    cancelled_at: localO.cancelled_at,
+                    rider_id: null,
+                    rider_name: null,
+                    riderId: null,
+                    riderName: null,
+                    deliveryPartner: undefined
+                  });
+                }
+              } else {
+                mergedMap.set(localO.id, localO);
+              }
+            });
+            
+            merged = Array.from(mergedMap.values());
+            merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+            return merged;
           });
 
           // Sync the active tracking order
           setActiveOrderForTracking((prevTrack) => {
             if (!prevTrack) return null;
-            const fresh = dbOrders.find((o) => o.id === prevTrack.id);
+            const fresh = merged.find((o) => o.id === prevTrack.id);
             if (fresh) {
               if (JSON.stringify(fresh) !== JSON.stringify(prevTrack)) {
                 return fresh;
@@ -575,7 +726,7 @@ export default function App() {
           });
 
           // Save list to dynamic local storage key
-          localStorage.setItem(getOrdersStorageKey(), JSON.stringify(dbOrders));
+          localStorage.setItem(getOrdersStorageKey(), JSON.stringify(merged));
         }
       } catch (err) {
         console.warn("[SmartCart Real-Time Sync] Fallback poll failed:", err);
@@ -592,14 +743,14 @@ export default function App() {
   const saveCart = (updatedCart: CartItem[]) => {
     setCart(updatedCart);
     try {
-      localStorage.setItem("smartcart_cart", JSON.stringify(updatedCart));
+      localStorage.setItem(getCartStorageKey(), JSON.stringify(updatedCart));
     } catch (e) {}
   };
 
   const saveWishlist = (updatedWishlist: Product[]) => {
     setWishlist(updatedWishlist);
     try {
-      localStorage.setItem("smartcart_wishlist", JSON.stringify(updatedWishlist));
+      localStorage.setItem(getWishlistStorageKey(), JSON.stringify(updatedWishlist));
     } catch (e) {}
   };
 
@@ -709,25 +860,177 @@ export default function App() {
 
   // --- Address Management Handlers ---
 
-  const handleAddAddressCoord = (addrInput: Omit<Address, "id">) => {
-    const newAddr: Address = {
-      ...addrInput,
-      id: `addr-${Date.now()}`,
-    };
-    const updated = [...savedAddresses, newAddr];
-    saveAddresses(updated);
-    setCurrentAddress(newAddr);
+  const handleAddAddressCoord = async (addrInput: Omit<Address, "id"> | Address, specifiedIsDefault?: boolean) => {
+    const isEditing = "id" in addrInput && !!addrInput.id;
+    const uid = auth.currentUser?.uid || null;
+    
+    // Requirement 8: Add console logs (UID and payload)
+    console.log("[SmartCart Address DB] Current user UID:", uid);
+    console.log("[SmartCart Address DB] Address payload:", addrInput);
+
+    if (auth.currentUser) {
+      try {
+        const isDefault = specifiedIsDefault !== undefined ? specifiedIsDefault : (savedAddresses.length === 0 || !!(addrInput as Address).isDefault);
+        
+        // Requirement 4 & 5: Ensure correct uid and path
+        const saved = await saveAddressToFirebase(auth.currentUser.uid, addrInput, isDefault);
+        
+        // Requirement 8: Firestore write success log
+        console.log("[SmartCart Address DB] Firestore write success. Saved address details:", saved);
+
+        // Requirement 6: Refetch addresses from Firestore
+        const fresh = await fetchSavedAddressesFromFirebase(auth.currentUser.uid);
+        console.log("[SmartCart Address DB] Refetched addresses List:", fresh);
+
+        // Requirement 6: Update savedAddresses state & localStorage
+        setSavedAddresses(fresh);
+        localStorage.setItem("smartcart_addresses", JSON.stringify(fresh));
+
+        // Requirement 10: Automatically load the default address or newly saved address
+        if (isDefault || !currentAddress || currentAddress.id === saved.id) {
+          setCurrentAddress(saved);
+        } else {
+          const found = fresh.find(a => a.id === saved.id);
+          if (found) setCurrentAddress(found);
+        }
+
+        // Requirements 6 & 9: Sync to user profile collection
+        try {
+          await syncUserProfileToFirebase({
+            userId: auth.currentUser.uid,
+            phone: userPhone,
+            name: userName,
+            email: userEmail,
+            addresses: fresh,
+            role: userRole as any,
+          });
+        } catch (err) {
+          console.warn("[SmartCart Address DB] Could not sync addresses array to user profile", err);
+        }
+
+        // Return the saved address to let callers know it's successfully complete
+        return saved;
+      } catch (error) {
+        // Requirement 8: Firestore write failure log
+        console.error("[SmartCart Address DB] Firestore write failure:", error);
+        throw error;
+      }
+    } else {
+      const newAddr: Address = {
+        ...addrInput,
+        id: isEditing ? (addrInput as Address).id : `addr-${Date.now()}`,
+        isDefault: specifiedIsDefault !== undefined ? specifiedIsDefault : (savedAddresses.length === 0 || !!(addrInput as Address).isDefault),
+      } as Address;
+      const updated = isEditing
+        ? savedAddresses.map((a) => (a.id === newAddr.id ? newAddr : a))
+        : [...savedAddresses, newAddr];
+      
+      const cleaned = (specifiedIsDefault || newAddr.isDefault)
+        ? updated.map(a => ({ ...a, isDefault: a.id === newAddr.id }))
+        : updated;
+
+      saveAddresses(cleaned);
+      setCurrentAddress(newAddr);
+      return newAddr;
+    }
   };
 
-  const handleRemoveAddressCoord = (id: string) => {
-    const updated = savedAddresses.filter((a) => a.id !== id);
-    saveAddresses(updated);
-    if (currentAddress?.id === id) {
-      if (updated.length > 0) {
-        setCurrentAddress(updated[0]);
-      } else {
-        setCurrentAddress(null);
+  const handleRemoveAddressCoord = async (id: string) => {
+    if (isCustomerLoggedIn && auth.currentUser) {
+      await deleteAddressFromFirebase(auth.currentUser.uid, id);
+      const fresh = await fetchSavedAddressesFromFirebase(auth.currentUser.uid);
+      setSavedAddresses(fresh);
+      localStorage.setItem("smartcart_addresses", JSON.stringify(fresh));
+      if (currentAddress?.id === id) {
+        const nextDefault = fresh.find(a => a.isDefault === true) || fresh[0] || null;
+        setCurrentAddress(nextDefault);
       }
+      try {
+        await syncUserProfileToFirebase({
+          userId: auth.currentUser.uid,
+          phone: userPhone,
+          name: userName,
+          email: userEmail,
+          addresses: fresh,
+          role: userRole as any,
+        });
+      } catch (err) {
+        console.warn("Could not sync addresses array to user profile after deletion", err);
+      }
+    } else {
+      const updated = savedAddresses.filter((a) => a.id !== id);
+      saveAddresses(updated);
+      if (currentAddress?.id === id) {
+        if (updated.length > 0) {
+          setCurrentAddress(updated[0]);
+        } else {
+          setCurrentAddress(null);
+        }
+      }
+    }
+  };
+
+  const handleSetDefaultAddressCoord = async (id: string) => {
+    if (isCustomerLoggedIn && auth.currentUser) {
+      await setDefaultAddressInFirebase(auth.currentUser.uid, id);
+      const fresh = await fetchSavedAddressesFromFirebase(auth.currentUser.uid);
+      setSavedAddresses(fresh);
+      localStorage.setItem("smartcart_addresses", JSON.stringify(fresh));
+      const nextDefault = fresh.find(a => a.id === id) || null;
+      if (nextDefault) {
+        setCurrentAddress(nextDefault);
+      }
+      try {
+        await syncUserProfileToFirebase({
+          userId: auth.currentUser.uid,
+          phone: userPhone,
+          name: userName,
+          email: userEmail,
+          addresses: fresh,
+          role: userRole as any,
+        });
+      } catch (err) {
+        console.warn("Could not sync addresses array to user profile after set default", err);
+      }
+    } else {
+      const updated = savedAddresses.map((a) => ({ ...a, isDefault: a.id === id }));
+      saveAddresses(updated);
+      const nextDefault = updated.find(a => a.id === id) || null;
+      if (nextDefault) {
+        setCurrentAddress(nextDefault);
+      }
+    }
+  };
+
+  const handleResetAddresses = async () => {
+    if (isCustomerLoggedIn && auth.currentUser) {
+      try {
+        await clearAllAddressesFromFirebase(auth.currentUser.uid);
+        const fresh = await fetchSavedAddressesFromFirebase(auth.currentUser.uid);
+        setSavedAddresses(fresh);
+        setCurrentAddress(null);
+        localStorage.setItem("smartcart_addresses", JSON.stringify([]));
+        
+        try {
+          await syncUserProfileToFirebase({
+            userId: auth.currentUser.uid,
+            phone: userPhone,
+            name: userName,
+            email: userEmail,
+            addresses: [],
+            role: userRole as any,
+          });
+        } catch (err) {
+          console.warn("[SmartCart] Error syncing user profile after reset:", err);
+        }
+        console.log("[SmartCart] Address register reset successfully.");
+      } catch (err) {
+        console.error("Failed to reset address register:", err);
+        alert("Failed to reset address register. Please try again.");
+      }
+    } else {
+      saveAddresses([]);
+      setCurrentAddress(null);
     }
   };
 
@@ -743,7 +1046,9 @@ export default function App() {
 
     if (adrs && adrs.length > 0) {
       setSavedAddresses(adrs);
-      setCurrentAddress(adrs[0]);
+      // Automatically load the default address and avoid prompting again
+      const defaultAddr = adrs.find((a: any) => a.isDefault) || adrs[0];
+      setCurrentAddress(defaultAddr);
       localStorage.setItem("smartcart_addresses", JSON.stringify(adrs));
       setShowLocationOnboarding(false);
     } else {
@@ -797,20 +1102,27 @@ export default function App() {
       setActiveTab("profile");
       return;
     }
+    // Automatically select default address if not currently set
+    if (savedAddresses && savedAddresses.length > 0) {
+      if (!currentAddress || !savedAddresses.some(a => a.id === currentAddress.id)) {
+        const defaultAddr = savedAddresses.find(a => a.isDefault === true) || savedAddresses[0];
+        setCurrentAddress(defaultAddr);
+      }
+    }
     setIsCheckoutOpen(true);
   };
 
   const handleCompleteOrderPayment = (address: Address, payMethod: string) => {
-    // Subtotal Calculations
-    const subtotal = cart.reduce((acc, curr) => acc + curr.product.sellingPrice * curr.quantity, 0);
-    const delivery = subtotal > 200 ? 0 : 25;
-    const platform = 2;
-    let discount = 0;
-    if (appliedPromo && subtotal >= appliedPromo.minimumOrder) {
-      discount = appliedPromo.discountValue;
-    }
+    // Dynamic pricing calculations based on new system rules
+    const {
+      subtotal,
+      deliveryCharge: delivery,
+      platformFee,
+      handlingCharge,
+      total: totalBill,
+    } = calculatePricing(cart.reduce((acc, curr) => acc + curr.product.sellingPrice * curr.quantity, 0));
 
-    const totalBill = Math.max(0, subtotal - discount + delivery + platform);
+    const discount = 0;
 
     let orderUserId = "anonymous";
     if (auth.currentUser) {
@@ -839,6 +1151,8 @@ export default function App() {
       subtotal,
       discount,
       deliveryCharge: delivery,
+      platformFee,
+      handlingCharge,
       total: totalBill,
       status: "placed",
       address,
@@ -863,7 +1177,12 @@ export default function App() {
     const newOrdersList = [newOrder, ...orders];
     saveOrders(newOrdersList);
     saveCart([]); // Clear Cart upon checkouts
-    setAppliedPromo(null); // Reset promos
+
+    // Automatically load the saved default address after order placement
+    if (savedAddresses && savedAddresses.length > 0) {
+      const defaultAddr = savedAddresses.find(a => a.isDefault === true) || savedAddresses[0];
+      setCurrentAddress(defaultAddr);
+    }
 
     // Close checkout wizard and open tracking sheet instantly!
     setIsCheckoutOpen(false);
@@ -931,26 +1250,117 @@ export default function App() {
     );
   };
 
-  const handleUpdateOrderStatus = (orderId: string, status: Order["status"]) => {
-    const updated = orders.map((o) => (o.id === orderId ? { ...o, status } : o));
+  const handleUpdateOrderStatus = async (orderId: string, status: Order["status"]) => {
+    console.log(`[SmartCart Debug] handleUpdateOrderStatus triggered for Order ID: ${orderId} status: "${status}"`);
+    const timestamp = new Date().toISOString();
+    const existingOrder = orders.find((o) => o.id === orderId);
+
+    if (status === "cancelled" && existingOrder) {
+      console.log("[SmartCart Debug] Cancel Function Started in App.tsx for order ID:", orderId);
+      const isRiderRole = userRole === "Rider" || activeTab === "rider";
+      const isAdminRole = userRole === "Admin" || activeTab === "admin";
+      
+      // Customers can cancel when status is exactly "placed"
+      if (!isRiderRole && !isAdminRole) {
+        if (existingOrder.status !== "placed") {
+          console.log("[SmartCart Debug] Cancel Action Blocked: Status is not 'placed'", existingOrder.status);
+          alert(`This order can no longer be cancelled because its status is "${existingOrder.status}". Only orders in "placed" status can be cancelled.`);
+          return;
+        }
+      }
+    }
+
+    const updated = orders.map((o) => {
+      if (o.id !== orderId) return o;
+
+      const orderUpdate: any = {
+        ...o,
+        status,
+        delivery_status: status,
+      };
+
+      switch (status) {
+        case "placed":
+          orderUpdate.placed_at = timestamp;
+          break;
+
+        case "accepted":
+        case "confirmed":
+          orderUpdate.accepted_at = timestamp;
+          orderUpdate.acceptedAt = timestamp;
+          break;
+
+        case "packed":
+          orderUpdate.packed_at = timestamp;
+          break;
+
+        case "out_for_delivery":
+          orderUpdate.out_for_delivery_at = timestamp;
+          break;
+
+        case "delivered":
+          orderUpdate.delivered_at = timestamp;
+          break;
+
+        case "cancelled":
+          orderUpdate.cancelled_at = timestamp;
+          orderUpdate.cancelledAt = timestamp;
+
+          // Remove rider assignment
+          orderUpdate.rider_id = null;
+          orderUpdate.rider_name = null;
+          orderUpdate.riderId = null;
+          orderUpdate.riderName = null;
+          orderUpdate.deliveryPartner = null;
+          orderUpdate.assigned_at = null;
+          orderUpdate.accepted_at = null;
+          orderUpdate.acceptedAt = null;
+          break;
+      }
+
+      if (orderUpdate.deliveryPartner) {
+        orderUpdate.deliveryPartner = {
+          ...orderUpdate.deliveryPartner,
+          delivery_status: status,
+          ...(status === "accepted" || status === "confirmed"
+            ? { accepted_at: timestamp }
+            : {}),
+        };
+      }
+
+      return orderUpdate;
+    });
+
+    // Update React State and LocalStorage instantly
     saveOrders(updated);
-    
+    console.log(`[SmartCart Debug] Order State Updated: Local state for Order ID: ${orderId} updated instantly in React configuration list to status: "${status}"`);
+
     // Sync current active tracker reference as well
     if (activeOrderForTracking && activeOrderForTracking.id === orderId) {
-      setActiveOrderForTracking({
-        ...activeOrderForTracking,
-        status,
-      });
+      const activeUpdate = updated.find((o) => o.id === orderId);
+      if (activeUpdate) {
+        setActiveOrderForTracking(activeUpdate);
+      }
     }
 
     // Sync updated status to Firebase backend in real-time
     const updatedOrder = updated.find((o) => o.id === orderId);
     if (updatedOrder) {
-      syncOrderToFirebase(updatedOrder);
+      console.log(`[SmartCart Debug] Firestore Update Started: Sync'ing order #${orderId} status "${status}" with Firestore...`);
+      try {
+        await syncOrderToFirebase(updatedOrder);
+        console.log(`[SmartCart Debug] Firestore Update Success: Order #${orderId} successfully synced to Firestore.`);
+        if (status === "cancelled") {
+          alert("Success: Your order has been cancelled successfully!");
+        }
+      } catch (err) {
+        console.error(`[SmartCart Debug] Firestore Update Failed: Failed to update Firestore status for order ${orderId}:`, err);
+        alert(`Failed to update order status in backend. Please verify your network and permissions.`);
+      }
     }
   };
 
-  const handleAssignRiderPartner = (orderId: string, partnerName: string) => {
+  const handleAssignRiderPartner = async (orderId: string, partnerName: string) => {
     const matchingRider = riders.find((r) => r.name === partnerName);
     const selectedPhone = matchingRider?.phone || `+91 98${Math.floor(10000000 + Math.random() * 90000000)}`;
     const selectedAvatar = matchingRider?.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=150";
@@ -1014,11 +1424,15 @@ export default function App() {
     // Sync allocated partner details to Firebase backend
     const updatedOrder = updated.find((o) => o.id === orderId);
     if (updatedOrder) {
-      syncOrderToFirebase(updatedOrder);
+      try {
+        await syncOrderToFirebase(updatedOrder);
+      } catch (err) {
+        console.error("Failed to sync assigned rider partner to firebase:", err);
+      }
     }
   };
 
-  const handleAssignPartnerToOrder = (
+  const handleAssignPartnerToOrder = async (
     orderId: string,
     partner: { id?: string; name: string; phone: string; avatar: string; vehicleNumber?: string },
     newStatus?: Order["status"]
@@ -1039,6 +1453,9 @@ export default function App() {
           assigned_at: timestamp,
           accepted_at: timestamp,
           delivery_status: targetStatus,
+          riderId: rId,
+          riderName: partner.name,
+          acceptedAt: timestamp,
           deliveryPartner: {
             id: rId,
             name: partner.name,
@@ -1066,6 +1483,9 @@ export default function App() {
         assigned_at: timestamp,
         accepted_at: timestamp,
         delivery_status: targetStatus,
+        riderId: rId,
+        riderName: partner.name,
+        acceptedAt: timestamp,
         deliveryPartner: {
           id: rId,
           name: partner.name,
@@ -1082,7 +1502,7 @@ export default function App() {
 
     const updatedOrder = updated.find((o) => o.id === orderId);
     if (updatedOrder) {
-      syncOrderToFirebase(updatedOrder);
+      await syncOrderToFirebase(updatedOrder);
     }
   };
 
@@ -1278,9 +1698,9 @@ export default function App() {
                   {bestOffersSubset.length > 0 && (
                     <section className="text-left">
                       <div className="mb-4">
-                        <span className="text-[10px] bg-orange-100 text-[#F97316] font-bold px-2 py-0.5 rounded uppercase font-black">Limited Promos</span>
-                        <h3 className="text-lg font-black text-gray-900 tracking-tight mt-1">Best Offers & Heavy Discounts</h3>
-                        <p className="text-xs text-gray-400 font-semibold leading-none mt-1">Grab fresh items with peak price reductions today</p>
+                        <span className="text-[10px] bg-orange-100 text-[#F97316] font-bold px-2 py-0.5 rounded uppercase font-black">Daily Essentials</span>
+                        <h3 className="text-lg font-black text-gray-900 tracking-tight mt-1">Best Value Deals</h3>
+                        <p className="text-xs text-gray-400 font-semibold leading-none mt-1">Grab fresh items at the best prices today</p>
                       </div>
 
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
@@ -1447,6 +1867,8 @@ export default function App() {
             savedAddresses={savedAddresses}
             onAddAddress={handleAddAddressCoord}
             onRemoveAddress={handleRemoveAddressCoord}
+            onSetDefaultAddress={handleSetDefaultAddressCoord}
+            onResetAddresses={handleResetAddresses}
             wishlist={wishlist}
             onRemoveFromWishlist={handleToggleWishlist}
             onAddToCart={handleAddToCart}
@@ -1461,6 +1883,7 @@ export default function App() {
             isCustomerLoggedIn={isCustomerLoggedIn}
             onCustomerLogin={handleCustomerLogin}
             onCustomerLogout={handleCustomerLogout}
+            onUpdateOrderStatus={handleUpdateOrderStatus}
           />
         )}
 
@@ -1539,8 +1962,8 @@ export default function App() {
         onRemoveItem={handleRemoveItemFromCart}
         onSaveForLater={handleSaveForLater}
         onProceedToCheckout={handleCheckoutProced}
-        appliedPromo={appliedPromo}
-        onApplyPromo={setAppliedPromo}
+        appliedPromo={null}
+        onApplyPromo={() => {}}
       />
 
       {/* C. 3-STEP CHECKOUT modal */}
@@ -1551,7 +1974,7 @@ export default function App() {
         onAddAddress={handleAddAddressCoord}
         selectedAddress={currentAddress}
         onSelectAddress={setCurrentAddress}
-        totalAmount={cartTotal > 150 ? (cartTotal - (appliedPromo?.discountValue || 0) + (cartTotal > 200 ? 0 : 25) + 2) : cartTotal} // handle direct fallback calculation in visual payment summary
+        totalAmount={calculatePricing(cartTotal).total}
         onCompletePayment={handleCompleteOrderPayment}
       />
 
@@ -1562,6 +1985,7 @@ export default function App() {
         userName={userName}
         userPhone={userPhone}
         onAddAddress={handleAddAddressCoord}
+        savedAddresses={savedAddresses}
       />
 
       {/* D. LIVE TRACKING TIMELINE sheet */}

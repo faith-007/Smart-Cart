@@ -6,7 +6,7 @@ interface CheckoutModalProps {
   isOpen: boolean;
   onClose: () => void;
   savedAddresses: Address[];
-  onAddAddress: (addr: Omit<Address, "id">) => void;
+  onAddAddress: (addr: Omit<Address, "id">, setAsDefault?: boolean) => Promise<any> | void;
   selectedAddress: Address | null;
   onSelectAddress: (addr: Address) => void;
   totalAmount: number;
@@ -25,14 +25,18 @@ export default function CheckoutModal({
 }: CheckoutModalProps) {
   const [step, setStep] = useState<1 | 2>(1);
   const [isAddingAddress, setIsAddingAddress] = useState(false);
+  const [isSavingAddress, setIsSavingAddress] = useState(false);
 
   // Address Form State
   const [newLabel, setNewLabel] = useState<"Home" | "Work" | "Other">("Home");
   const [newName, setNewName] = useState("");
-  const [newAddressLine, setNewAddressLine] = useState("");
+  const [newHouseFlatNumber, setNewHouseFlatNumber] = useState("");
+  const [newStreet, setNewStreet] = useState("");
   const [newCity, setNewCity] = useState("New Delhi");
+  const [newStateVal, setNewStateVal] = useState("Delhi");
   const [newPincode, setNewPincode] = useState("");
   const [newPhone, setNewPhone] = useState("");
+  const [newIsDefault, setNewIsDefault] = useState(false);
   const [formError, setFormError] = useState("");
   const [isDetecting, setIsDetecting] = useState(false);
 
@@ -64,20 +68,22 @@ export default function CheckoutModal({
           .then((res) => res.json())
           .then((data) => {
             if (data && data.display_name) {
-              setNewAddressLine(data.display_name);
+              setNewStreet(data.display_name);
               if (data.address) {
                 const cityVal = data.address.city || data.address.town || data.address.suburb || data.address.state_district || "New Delhi";
                 const pinVal = data.address.postcode || "";
+                const stateVal = data.address.state || "Delhi";
                 setNewCity(cityVal);
+                setNewStateVal(stateVal);
                 if (pinVal) setNewPincode(pinVal);
               }
             } else {
-              setNewAddressLine(`Estimated Location (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
+              setNewStreet(`Estimated Location (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
             }
           })
           .catch((err) => {
             console.error("[SmartCart Geolocation] OSM lookup failed, using coordinates:", err);
-            setNewAddressLine(`Coordinates (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
+            setNewStreet(`Coordinates (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
           })
           .finally(() => {
             setIsDetecting(false);
@@ -92,38 +98,70 @@ export default function CheckoutModal({
     );
   };
 
-  const handleAddNewAddress = (e: React.FormEvent) => {
+  const handleAddNewAddress = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newAddressLine.trim() || !newPincode.trim() || !newPhone.trim()) {
+    if (!newName.trim() || !newHouseFlatNumber.trim() || !newStreet.trim() || !newPincode.trim() || !newPhone.trim() || !newStateVal.trim()) {
       setFormError("All fields marked with * are strictly mandatory.");
       return;
     }
-    if (newPhone.trim().length < 10) {
+    if (newPhone.replace(/\D/g, "").length < 10) {
       setFormError("Please provide a valid 10-digit mobile number.");
       return;
     }
 
-    onAddAddress({
-      label: newLabel,
-      name: newName.trim(),
-      addressLine: newAddressLine.trim(),
-      city: newCity.trim(),
-      pincode: newPincode.trim(),
-      phone: "+91 " + newPhone.replace(/\D/g, "").slice(-10),
-    });
+    const cleanedPhone = "+91 " + newPhone.replace(/\D/g, "").slice(-10);
+    const combinedAddress = `${newHouseFlatNumber.trim()}, ${newStreet.trim()}`;
 
-    // Reset Address Form State
-    setIsAddingAddress(false);
-    setNewName("");
-    setNewAddressLine("");
-    setNewPincode("");
-    setNewPhone("");
+    setIsSavingAddress(true);
     setFormError("");
+
+    try {
+      await onAddAddress({
+        label: newLabel,
+        name: newName.trim(),
+        addressLine: combinedAddress,
+        city: newCity.trim(),
+        pincode: newPincode.trim(),
+        phone: cleanedPhone,
+        fullName: newName.trim(),
+        phoneNumber: cleanedPhone,
+        houseFlatNumber: newHouseFlatNumber.trim(),
+        street: newStreet.trim(),
+        landmark: newLabel,
+        state: newStateVal.trim(),
+        isDefault: newIsDefault,
+      }, newIsDefault);
+
+      // Reset Address Form State
+      setIsAddingAddress(false);
+      setNewName("");
+      setNewHouseFlatNumber("");
+      setNewStreet("");
+      setNewPincode("");
+      setNewPhone("");
+      setNewIsDefault(false);
+      setFormError("");
+    } catch (err: any) {
+      console.error("[CheckoutModal] Failed to save address:", err);
+      let msg = "Could not save address. Please check your network and try again.";
+      if (err instanceof Error) {
+        msg = err.message;
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed && parsed.error) {
+            msg = `Firestore Error: ${parsed.error}`;
+          }
+        } catch (_) {}
+      }
+      setFormError(msg);
+    } finally {
+      setIsSavingAddress(false);
+    }
   };
 
   const handleTriggerPayment = () => {
-    if (payMethod.startsWith("UPI") && (!upiId.trim() || !upiId.includes("@"))) {
-      setPaymentError("Please provide a valid UPI ID (e.g. yourname@upi).");
+    if (payMethod.includes("UPI") || payMethod.includes("Unified")) {
+      setPaymentError("UPI payments are currently disabled. Please select Cash on Delivery to place your order.");
       return;
     }
 
@@ -302,15 +340,27 @@ export default function CheckoutModal({
                   />
                 </div>
 
-                <div className="col-span-full">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase">Street Address / House Line *</label>
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase">House / Flat / Floor *</label>
                   <input
                     type="text"
                     required
-                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium placeholder-gray-400 focus:border-green-500 focus:ring-1 focus:ring-green-500"
-                    placeholder="Flat/House No., Building Name, Street Name"
-                    value={newAddressLine}
-                    onChange={(e) => setNewAddressLine(e.target.value)}
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium placeholder-gray-400 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-hidden"
+                    placeholder="e.g. Flat 302, 3rd Floor"
+                    value={newHouseFlatNumber}
+                    onChange={(e) => setNewHouseFlatNumber(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase">Street Row / Sector *</label>
+                  <input
+                    type="text"
+                    required
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium placeholder-gray-400 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-hidden"
+                    placeholder="e.g. Cyber City, Sector 24"
+                    value={newStreet}
+                    onChange={(e) => setNewStreet(e.target.value)}
                   />
                 </div>
 
@@ -319,9 +369,20 @@ export default function CheckoutModal({
                   <input
                     type="text"
                     required
-                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-hidden"
                     value={newCity}
                     onChange={(e) => setNewCity(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase">State *</label>
+                  <input
+                    type="text"
+                    required
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-hidden"
+                    value={newStateVal}
+                    onChange={(e) => setNewStateVal(e.target.value)}
                   />
                 </div>
 
@@ -330,7 +391,7 @@ export default function CheckoutModal({
                   <input
                     type="text"
                     required
-                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium placeholder-gray-400 focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                    className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium placeholder-gray-400 focus:border-green-500 focus:ring-1 focus:ring-green-500 focus:outline-hidden"
                     placeholder="6-digit Area code"
                     maxLength={6}
                     value={newPincode}
@@ -338,21 +399,43 @@ export default function CheckoutModal({
                   />
                 </div>
 
+                <div className="col-span-full flex items-center space-x-2 mt-1 py-1">
+                  <input
+                    type="checkbox"
+                    id="checkout-default-checkbox"
+                    checked={newIsDefault}
+                    onChange={(e) => setNewIsDefault(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-green-500 focus:ring-green-500 cursor-pointer"
+                  />
+                  <label htmlFor="checkout-default-checkbox" className="text-xs font-bold text-gray-600 cursor-pointer select-none">
+                    Set as Default Address
+                  </label>
+                </div>
+
                 {formError && <p className="col-span-full text-[10px] font-bold text-red-500 bg-red-50 p-2 rounded-lg">{formError}</p>}
 
                 <div className="col-span-full flex justify-end gap-2 mt-2">
                   <button
                     type="button"
+                    disabled={isSavingAddress}
                     onClick={() => setIsAddingAddress(false)}
-                    className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-xs font-bold rounded-xl cursor-pointer"
+                    className="px-4 py-2 border border-gray-200 hover:bg-gray-50 text-xs font-bold rounded-xl cursor-pointer disabled:opacity-50"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-green-500 text-white font-black text-xs rounded-xl hover:bg-green-600 transition cursor-pointer"
+                    disabled={isSavingAddress}
+                    className="px-5 py-2 bg-green-500 text-white font-black text-xs rounded-xl hover:bg-green-600 transition cursor-pointer flex items-center space-x-1.5 disabled:opacity-50"
                   >
-                    Save Address
+                    {isSavingAddress ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      <span>Save Address</span>
+                    )}
                   </button>
                 </div>
               </form>
@@ -431,21 +514,30 @@ export default function CheckoutModal({
               {/* Payment Methods selector column */}
               <div className="md:col-span-2 space-y-2">
                 {METHODS.map((method) => {
-                  const isSelected = payMethod === method.value;
+                  const isUPI = method.isComingSoon;
+                  const isSelected = !isUPI && payMethod === method.value;
                   return (
                     <div
                       key={method.value}
                       onClick={() => {
+                        if (isUPI) {
+                          setPaymentError("UPI payments are currently disabled. Please select Cash on Delivery.");
+                          return;
+                        }
                         setPayMethod(method.value);
                         setPaymentError("");
                       }}
                       className={`p-3 rounded-xl border text-left cursor-pointer transition ${
-                        isSelected ? "border-green-500 bg-green-50/10 shadow-xs" : "border-gray-150 hover:bg-gray-50"
+                        isUPI 
+                          ? "opacity-50 cursor-not-allowed bg-gray-50 border-gray-200" 
+                          : isSelected 
+                            ? "border-green-500 bg-green-50/10 shadow-xs" 
+                            : "border-gray-150 hover:bg-gray-50"
                       }`}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-black text-gray-800">{method.label}</span>
+                          <span className={`text-xs font-black ${isUPI ? "text-gray-400" : "text-gray-800"}`}>{method.label}</span>
                           {method.isComingSoon && (
                             <span id="upi-coming-soon-badge-list" className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 border border-amber-250 text-amber-600 font-sans tracking-wide">
                               Coming Soon
@@ -454,7 +546,11 @@ export default function CheckoutModal({
                         </div>
                         <div
                           className={`h-4.5 w-4.5 rounded-full border flex items-center justify-center ${
-                            isSelected ? "border-green-500" : "border-gray-300"
+                            isUPI 
+                              ? "border-gray-200 bg-gray-100" 
+                              : isSelected 
+                                ? "border-green-500" 
+                                : "border-gray-300"
                           }`}
                         >
                           {isSelected && <div className="h-2 w-2 rounded-full bg-green-500" />}

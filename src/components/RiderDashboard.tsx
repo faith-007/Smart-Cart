@@ -21,10 +21,10 @@ import {
   FileText,
   AlertCircle
 } from "lucide-react";
-import { Rider, Order } from "../types";
-import { fetchOrdersFromFirebase, syncRiderToFirebase } from "../lib/firebase";
+import { Rider, Order } from "../types.ts";
+import { auth, fetchOrdersFromFirebase, syncRiderToFirebase } from "../lib/firebase";
 import { motion } from "motion/react";
-import RiderAvatar from "./RiderAvatar";
+import RiderAvatar from "./RiderAvatar.tsx";
 
 interface RiderDashboardProps {
   riders: Rider[];
@@ -35,10 +35,39 @@ interface RiderDashboardProps {
     id: string,
     partner: { id?: string; name: string; phone: string; avatar: string; vehicleNumber?: string },
     newStatus?: Order["status"]
-  ) => void;
+  ) => any;
   onPassOrder: (orderId: string, riderId: string) => void;
   riderSession: Rider | null;
   setRiderSession: React.Dispatch<React.SetStateAction<Rider | null>>;
+}
+
+export function getOrderGridCoordinates(addressLine: string, orderId: string) {
+  // Extract coordinate patterns like (Lat: 28.5123, Lng: 77.0123)
+  const latMatch = addressLine?.match(/Lat:\s*([-\d.]+)/i);
+  const lngMatch = addressLine?.match(/Lng:\s*([-\d.]+)/i);
+  
+  if (latMatch && lngMatch) {
+    const latitude = parseFloat(latMatch[1]);
+    const longitude = parseFloat(lngMatch[1]);
+    
+    // Delhi bounding box: Lat 28.4 to 28.8, Lng 76.9 to 77.3
+    // Use the exact same formula to scale to the 10 - 90 percentage grid
+    const relativeLat = Math.max(10, Math.min(90, ((latitude - 28.4) / 0.4) * 100));
+    const relativeLng = Math.max(10, Math.min(90, ((longitude - 76.9) / 0.4) * 100));
+    return { lat: relativeLat, lng: relativeLng };
+  }
+
+  // Fallback: stable hashing based on address contents so it always resolves to a specific localized coordinate
+  let hash = 0;
+  const combinedStr = (addressLine || "") + (orderId || "");
+  for (let i = 0; i < combinedStr.length; i++) {
+    hash = combinedStr.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  // Map value to some stable grid coordinate between 15% and 85%
+  const latOffset = 15 + Math.abs((hash >> 2) % 70);
+  const lngOffset = 15 + Math.abs((hash >> 9) % 70);
+  
+  return { lat: latOffset, lng: lngOffset };
 }
 
 export default function RiderDashboard({
@@ -64,6 +93,15 @@ export default function RiderDashboard({
   const [notification, setNotification] = useState<string | null>(null);
   const [isAcceptingOrder, setIsAcceptingOrder] = useState<string | null>(null);
 
+  const getDistanceToOrder = (o: Order) => {
+    if (!riderSession) return 0;
+    const coords = getOrderGridCoordinates(o.address.addressLine, o.id);
+    const dx = riderSession.lat - coords.lat;
+    const dy = riderSession.lng - coords.lng;
+    const gridDistance = Math.sqrt(dx * dx + dy * dy);
+    return Number((gridDistance * 0.55).toFixed(1));
+  };
+
   // Geolocation tracking state
   const [watchId, setWatchId] = useState<number | null>(null);
 
@@ -75,6 +113,35 @@ export default function RiderDashboard({
       );
     }
   }, [riderSession]);
+
+  // Automatically match and populate riderSession if logged in via general Firebase Auth
+  useEffect(() => {
+    if (!riderSession && auth.currentUser) {
+      const email = auth.currentUser.email?.toLowerCase().trim();
+      const matched = riders.find((r) => r.email?.toLowerCase().trim() === email);
+      if (matched) {
+        const authRider = { ...matched, isActiveOnDuty: true };
+        setRiderSession(authRider);
+        localStorage.setItem("smartcart_rider_session", JSON.stringify(authRider));
+      }
+    }
+  }, [riderSession, riders, setRiderSession]);
+
+  // Watch for cancelled orders to notify the rider in real-time
+  const [notifiedCancelledOrders, setNotifiedCancelledOrders] = useState<string[]>([]);
+  useEffect(() => {
+    if (!riderSession) return;
+    const cancelledAssignedOrder = orders.find(
+      (o) =>
+        o.status === "cancelled" &&
+        o.deliveryPartner &&
+        (o.deliveryPartner.id === riderSession.id || o.rider_id === riderSession.id)
+    );
+    if (cancelledAssignedOrder && !notifiedCancelledOrders.includes(cancelledAssignedOrder.id)) {
+      setNotification(`🚨 Alert: Order #${cancelledAssignedOrder.id} has been cancelled by the customer.`);
+      setNotifiedCancelledOrders((prev) => [...prev, cancelledAssignedOrder.id]);
+    }
+  }, [orders, riderSession, notifiedCancelledOrders]);
 
   // Auto-notification for incoming orders
   useEffect(() => {
@@ -279,7 +346,7 @@ export default function RiderDashboard({
     console.log(`[RiderDashboard] Starting safe verification and assignment for Order #${orderId}`);
     try {
       // 1. Fetch fresh list from Firebase first
-      const freshOrders = await fetchOrdersFromFirebase("Rider", true);
+      const freshOrders = await fetchOrdersFromFirebase("Rider", false);
       const targetOrder = freshOrders.find((o) => o.id === orderId);
 
       // 2. Validate double claim or race condition
@@ -291,7 +358,7 @@ export default function RiderDashboard({
       }
 
       // 3. Perform assignment through our consolidated top-level handler
-      onAssignPartnerToOrder(
+      await onAssignPartnerToOrder(
         orderId,
         {
           id: riderSession.id,
@@ -300,7 +367,7 @@ export default function RiderDashboard({
           avatar: riderSession.avatar,
           vehicleNumber: riderSession.vehicleNumber,
         },
-        "confirmed"
+        "accepted"
       );
 
       // 4. Update local rider analytics in memory / localStorage
@@ -373,12 +440,27 @@ export default function RiderDashboard({
       }
       
       // Simulating coordinate movement on grid toward target bounds
-      // Fulfillment hub was set near (45%, 45%), Customer destination is simulated randomly
+      // Fulfillment hub was set near (45%, 45%), Customer destination is simulated dynamically
+      const activeOrder = orders.find(
+        (o) =>
+          o.deliveryPartner &&
+          (o.deliveryPartner.id === riderSession.id ||
+            o.rider_id === riderSession.id ||
+            o.deliveryPartner.name === riderSession.name) &&
+          o.status !== "delivered" &&
+          o.status !== "cancelled"
+      );
+      let destLat = 30;
+      let destLng = 70;
+      if (activeOrder) {
+        const coords = getOrderGridCoordinates(activeOrder.address.addressLine, activeOrder.id);
+        destLat = coords.lat;
+        destLng = coords.lng;
+      }
+
       const progressFactor = next / 100;
       const startLat = 45;
       const startLng = 45;
-      const destLat = 30; // Mock customer coordinate target
-      const destLng = 70;
 
       const currentLat = startLat + (destLat - startLat) * progressFactor;
       const currentLng = startLng + (destLng - startLng) * progressFactor;
@@ -438,11 +520,26 @@ export default function RiderDashboard({
     const next = Math.min(100, simulatedPathPercent + 20);
     setSimulatedPathPercent(next);
       
+    const activeOrder = orders.find(
+      (o) =>
+        o.deliveryPartner &&
+        (o.deliveryPartner.id === riderSession.id ||
+          o.rider_id === riderSession.id ||
+          o.deliveryPartner.name === riderSession.name) &&
+        o.status !== "delivered" &&
+        o.status !== "cancelled"
+    );
+    let destLat = 30;
+    let destLng = 70;
+    if (activeOrder) {
+      const coords = getOrderGridCoordinates(activeOrder.address.addressLine, activeOrder.id);
+      destLat = coords.lat;
+      destLng = coords.lng;
+    }
+
     const progressFactor = next / 100;
     const startLat = 45;
     const startLng = 45;
-    const destLat = 30;
-    const destLng = 70;
 
     const currentLat = startLat + (destLat - startLat) * progressFactor;
     const currentLng = startLng + (destLng - startLng) * progressFactor;
@@ -472,6 +569,8 @@ export default function RiderDashboard({
     const isUnassigned = (o.status === "placed" || o.status === "confirmed" || o.status === "packed") && !o.deliveryPartner;
     const isNotRejected = !o.rejectedByRiders?.includes(riderSession?.id || "");
     return isUnassigned && isNotRejected;
+  }).sort((a, b) => {
+    return getDistanceToOrder(a) - getDistanceToOrder(b);
   });
 
   const deliveryHistory = orders.filter((o) => {
@@ -480,6 +579,16 @@ export default function RiderDashboard({
 
   // Render Login page if caller session is offline
   if (!riderSession) {
+    const isRiderLoggedInObj = auth.currentUser && riders.find(r => r.email?.toLowerCase().trim() === auth.currentUser?.email?.toLowerCase().trim());
+    if (isRiderLoggedInObj) {
+      return (
+        <div className="mx-auto max-w-lg min-h-[75vh] flex flex-col items-center justify-center px-4 py-8" id="rider-loading-portal">
+          <Loader2 className="h-8 w-8 text-orange-500 animate-spin" />
+          <p className="text-xs text-slate-400 font-medium mt-3">Connecting securely to Rider Session...</p>
+        </div>
+      );
+    }
+
     return (
       <div className="mx-auto max-w-lg min-h-[75vh] flex flex-col items-center justify-center px-4 py-8" id="rider-auth-portal">
         <motion.div 
@@ -739,11 +848,6 @@ export default function RiderDashboard({
                             <span className="text-[10px] font-extrabold text-orange-500 font-sans tracking-wide">#{order.id}</span>
                             <div className="text-xs font-black text-gray-900 mt-0.5 capitalize">{order.address.name}</div>
                           </div>
-                          <span className={`text-[10px] px-2.5 py-1 rounded-full font-black uppercase ${
-                            isOut ? "bg-orange-100 text-orange-700 animate-pulse" : "bg-green-100 text-green-700"
-                          }`}>
-                            {order.status === "confirmed" ? "Accepted" : order.status === "packed" ? "Packed & Ready" : "On the way"}
-                          </span>
                         </div>
 
                         {/* Customer Address Details */}
@@ -793,7 +897,7 @@ export default function RiderDashboard({
                             <p className="text-[10px] text-gray-400 font-extrabold uppercase tracking-widest leading-none mb-2">Select Progress Status</p>
                             <div className="relative">
                               <select
-                                value={order.status}
+                                value={order.status === "confirmed" ? "accepted" : order.status}
                                 onChange={(e) => {
                                   const val = e.target.value as Order["status"];
                                   if (val === "packed") {
@@ -803,8 +907,8 @@ export default function RiderDashboard({
                                     handleStartDelivery(order.id);
                                   } else if (val === "delivered") {
                                     handleCompleteDelivery(order.id);
-                                  } else if (val === "confirmed") {
-                                    onUpdateOrderStatus(order.id, "confirmed");
+                                  } else if (val === "accepted" || val === "confirmed") {
+                                    onUpdateOrderStatus(order.id, "accepted");
                                     setNotification(`Order #${order.id} marked as Accepted.`);
                                   }
                                 }}
@@ -818,7 +922,7 @@ export default function RiderDashboard({
                                     : "bg-blue-500 border-blue-500 text-white shadow-md shadow-blue-100"
                                 }`}
                               >
-                                <option value="confirmed" className="text-gray-900 bg-white font-bold">Accepted (Confirmed)</option>
+                                <option value="accepted" className="text-gray-900 bg-white font-bold">Accepted</option>
                                 <option value="packed" className="text-gray-900 bg-white font-bold">Packed & Loaded</option>
                                 <option value="out_for_delivery" className="text-gray-900 bg-white font-bold">On the way (Out For Delivery)</option>
                                 <option value="delivered" className="text-gray-900 bg-white font-bold">Delivered / Cash Collected</option>
@@ -887,76 +991,91 @@ export default function RiderDashboard({
 
             {/* Unassigned Incoming Delivery requests list */}
             <div>
-              <div className="flex items-center justify-between mb-3 border-b border-gray-100 pb-2.5 mt-8">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 border-b border-gray-100 pb-3 mt-8">
                 <div>
                   <h3 className="text-xs font-black text-gray-900 uppercase tracking-wider">Incoming Delivery Requests</h3>
-                  <p className="text-[10px] text-gray-400 font-bold uppercase">Open unassigned orders near you</p>
+                  <p className="text-[10px] text-gray-400 font-bold uppercase">Open unassigned orders</p>
                 </div>
-                <span className="text-[10px] font-black bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full uppercase leading-none">{availableRequests.length} Near Hub</span>
+                <span className="self-start sm:self-auto text-[10px] font-black bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full uppercase leading-none">
+                  {availableRequests.length} Active Requests
+                </span>
               </div>
 
               {availableRequests.length === 0 ? (
-                <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-3xl p-8 text-center text-xs text-gray-400 font-medium">
-                  We'll sound the radar when new unassigned shipments are placed. Stand by!
+                <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-3xl p-8 text-center text-xs text-gray-400 font-medium whitespace-pre-line">
+                  📦 Standby! No unassigned orders available at the moment.
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {availableRequests.map((order) => (
-                    <motion.div 
-                      key={order.id} 
-                      initial={{ scale: 0.98, opacity: 0 }}
-                      whileInView={{ scale: 1, opacity: 1 }}
-                      className="bg-white border border-gray-150 rounded-2xl p-4 shadow-sm text-left relative overflow-hidden"
-                    >
-                      <div className="absolute top-0 right-0 bg-yellow-400 text-gray-900 text-[8px] font-black tracking-widest px-2.5 py-1 uppercase rounded-bl-xl shadow-xs leading-none">
-                        🔥 REQUEST
-                      </div>
-
-                      <div className="flex justify-between items-start border-b border-gray-50 pb-2.5 mb-2.5">
-                        <div>
-                          <span className="text-[10px] font-bold text-gray-400 uppercase font-sans"># {order.id}</span>
-                          <h4 className="text-xs font-black text-gray-800 leading-normal capitalize">{order.address.name}</h4>
+                  {availableRequests.map((order) => {
+                    const dist = getDistanceToOrder(order);
+                    const etaMins = Math.round(dist * 1.5) + 3;
+                    
+                    return (
+                      <motion.div 
+                        key={order.id} 
+                        initial={{ scale: 0.98, opacity: 0 }}
+                        whileInView={{ scale: 1, opacity: 1 }}
+                        className="bg-white border border-gray-150 rounded-2xl p-4 shadow-sm text-left relative overflow-hidden"
+                      >
+                        <div className="absolute top-0 right-0 bg-yellow-400 text-gray-900 text-[8px] font-black tracking-widest px-2.5 py-1 uppercase rounded-bl-xl shadow-xs leading-none">
+                          🔥 REQUEST
                         </div>
-                        <div className="text-right">
-                          <p className="text-xs font-bold text-orange-500">₹{order.total}</p>
-                          <p className="text-[9px] font-bold text-gray-400 uppercase">{order.paymentMethod}</p>
-                        </div>
-                      </div>
 
-                      <div className="space-y-1 text-[11px] text-gray-500 mb-3.5 font-medium">
-                        <p className="line-clamp-1"><strong className="text-gray-700">Hub Target:</strong> SmartCart ND01 Hub</p>
-                        <p className="line-clamp-1"><strong className="text-gray-700">Fulfill Point:</strong> {order.address.addressLine}, {order.address.city}</p>
-                        <p className="line-clamp-1 font-bold italic text-slate-500">"{order.deliveryInstructions || "Deliver fast, organic products requested"}"</p>
-                      </div>
-
-                      {/* Items loop */}
-                      <div className="border border-gray-100 bg-gray-50/50 p-2.5 rounded-xl text-[10px] space-y-1 font-mono mb-4 text-gray-600">
-                        {order.items.map((x, i) => (
-                          <div key={i} className="flex justify-between">
-                            <span>• {x.product.name} x{x.quantity}</span>
-                            <span>₹{x.product.sellingPrice * x.quantity}</span>
+                        <div className="flex justify-between items-start border-b border-gray-50 pb-2.5 mb-2.5">
+                          <div>
+                            <span className="text-[10px] font-bold text-gray-400 uppercase font-sans"># {order.id}</span>
+                            <h4 className="text-xs font-black text-gray-800 leading-normal capitalize">{order.address.name}</h4>
                           </div>
-                        ))}
-                      </div>
+                          <div className="text-right">
+                            <p className="text-xs font-bold text-orange-500">₹{order.total}</p>
+                            <p className="text-[9px] font-bold text-gray-400 uppercase">{order.paymentMethod}</p>
+                          </div>
+                        </div>
 
-                      {/* Actions */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          onClick={() => handleAcceptOrder(order.id)}
-                          className="py-2.5 bg-green-500 hover:bg-green-600 text-white font-extrabold uppercase tracking-wider text-xs rounded-xl transition cursor-pointer"
-                        >
-                          Accept Order to Deliver
-                        </button>
-                        <button
-                          onClick={() => handleRejectOrderAction(order.id)}
-                          className="py-2.5 bg-red-50 text-red-650 border border-red-150 hover:bg-red-100 font-extrabold uppercase tracking-wider text-xs rounded-xl transition cursor-pointer"
-                          title="Outright reject and cancel this order"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </motion.div>
-                  ))}
+                        <div className="space-y-1.5 text-[11px] text-gray-500 mb-3.5 font-medium">
+                          {riderSession && (
+                            <div className="flex items-center gap-1 text-[10px] font-black text-orange-600 bg-orange-50/70 py-1 px-2.5 rounded-lg border border-orange-100 w-fit mb-1 bg-clip-border">
+                              <MapPin className="h-3 w-3 text-orange-500" />
+                              <span>{dist === 0 ? "Directly at Hub" : `${dist} km away`} • Approx {etaMins} mins dispatch</span>
+                            </div>
+                          )}
+                          <p className="line-clamp-1"><strong className="text-gray-700">Hub Target:</strong> SmartCart ND01 Hub</p>
+                          <p className="line-clamp-1"><strong className="text-gray-700">Fulfill Point:</strong> {order.address.addressLine}, {order.address.city}</p>
+                          <p className="line-clamp-1 font-bold italic text-slate-500">"{order.deliveryInstructions || "Deliver fast, organic products requested"}"</p>
+                        </div>
+
+                        {/* Items loop */}
+                        <div className="border border-gray-100 bg-gray-50/50 p-2.5 rounded-xl text-[10px] space-y-1 font-mono mb-4 text-gray-600">
+                          {order.items.map((x, i) => (
+                            <div key={i} className="flex justify-between">
+                              <span>• {x.product.name} x{x.quantity}</span>
+                              <span>₹{x.product.sellingPrice * x.quantity}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleAcceptOrder(order.id)}
+                            className="py-2.5 bg-green-500 hover:bg-green-600 text-white font-extrabold uppercase tracking-wider text-xs rounded-xl transition cursor-pointer"
+                          >
+                            Accept Order to Deliver
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRejectOrderAction(order.id)}
+                            className="py-2.5 bg-red-50 text-red-650 border border-red-150 hover:bg-red-100 font-extrabold uppercase tracking-wider text-xs rounded-xl transition cursor-pointer"
+                            title="Outright reject and cancel this order"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
                 </div>
               )}
             </div>

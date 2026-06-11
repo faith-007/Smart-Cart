@@ -711,11 +711,56 @@ export default function AdminPanel({
                       </p>
                     </div>
 
+                    {/* Admin Pricing Breakdown info */}
+                    <div className="bg-gray-50 border border-gray-100 rounded-xl p-2 px-2.5 text-[10px] font-medium text-gray-500 space-y-0.5 mb-3">
+                      <div className="flex justify-between">
+                        <span>Items Subtotal:</span>
+                        <span className="font-bold text-gray-800">₹{order.subtotal}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Delivery Charge:</span>
+                        <span className={order.deliveryCharge === 0 ? "font-bold text-green-600" : "font-bold text-gray-800"}>
+                          {order.deliveryCharge === 0 ? "FREE" : `₹${order.deliveryCharge}`}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Platform Fee:</span>
+                        <span className="font-bold text-gray-800">₹{order.platformFee ?? 3}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Handling Charge:</span>
+                        <span className="font-bold text-gray-800">₹{order.handlingCharge ?? 10}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-gray-200 pt-1 text-[11px] font-black text-gray-900">
+                        <span>Total Bill:</span>
+                        <span>₹{order.total}</span>
+                      </div>
+                    </div>
+
                     {/* Dispatch Rider Allocation Controls */}
-                    <div className="pt-2.5 border-t border-gray-50 flex items-center justify-between gap-3 text-xs leading-none">
+                    <div className="pt-2.5 border-t border-gray-50 flex flex-col sm:flex-row justify-between gap-3 text-xs">
                       <div>
                         <p className="text-[9px] text-gray-400 font-semibold uppercase">Assigned Delivery Boy</p>
                         <p className="font-bold text-gray-800 mt-1">{order.deliveryPartner?.name || "Unassigned"}</p>
+                      </div>
+
+                      <div className="w-full sm:w-40">
+                        <p className="text-[9px] text-gray-400 font-semibold uppercase mb-1">Update Status</p>
+                        <select
+                          value={order.status}
+                          onChange={(e) => {
+                            onUpdateOrderStatus(order.id, e.target.value as any);
+                          }}
+                          className="block w-full text-[11px] font-bold border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-700 outline-none focus:border-orange-500 cursor-pointer"
+                        >
+                          <option value="placed">Order Received</option>
+                          <option value="accepted">Accepted</option>
+                          <option value="confirmed">Confirmed</option>
+                          <option value="packed">Packed</option>
+                          <option value="out_for_delivery">On The Way</option>
+                          <option value="delivered">Delivered</option>
+                          <option value="cancelled">Cancelled</option>
+                        </select>
                       </div>
                     </div>
 

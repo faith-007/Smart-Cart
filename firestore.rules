@@ -24,16 +24,19 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function getUserRole() {
-      return exists(/databases/$(database)/documents/profiles/$(request.auth.uid))
-        ? get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role
-        : 'Customer';
-    }
-
     function isRider() {
       return isSignedIn() && (
-        getUserRole() == 'Rider' ||
-        exists(/databases/$(database)/documents/riders/$(request.auth.uid))
+        exists(/databases/$(database)/documents/riders/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.get('role', 'Customer') == 'Rider')
+      );
+    }
+
+    function riderIdMatchesAuth(riderIdVal) {
+      return riderIdVal != null && (
+        riderIdVal == request.auth.uid ||
+        (exists(/databases/$(database)/documents/profiles/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.get('riderId', '') == riderIdVal)
       );
     }
 
@@ -77,13 +80,29 @@ service cloud.firestore {
 
     // 1. User profile collection
     match /profiles/{userId} {
-      allow read, create, update: if isSignedIn();
-      allow delete: if isAdmin();
+      allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
     }
 
     // 2. Orders collection
     match /orders/{orderId} {
-      allow read, create, update: if isSignedIn();
+      allow read: if isAdmin()
+        || (resource.data.userId == request.auth.uid)
+        || (isRider() && (
+             resource.data.status == 'placed' || 
+             riderIdMatchesAuth(resource.data.rider_id) || 
+             resource.data.rider_id == null || 
+             resource.data.rider_id == 'rider-unassigned'
+           ));
+      allow create: if isSignedIn() && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isAdmin()
+        || (resource.data.userId == request.auth.uid && request.resource.data.userId == request.auth.uid)
+        || (isRider() && (
+             resource.data.status == 'placed' || 
+             riderIdMatchesAuth(resource.data.rider_id) || 
+             riderIdMatchesAuth(request.resource.data.rider_id) ||
+             resource.data.rider_id == null ||
+             resource.data.rider_id == 'rider-unassigned'
+           ));
       allow delete: if isAdmin();
     }
     
@@ -94,9 +113,20 @@ service cloud.firestore {
     }
     
     // 4. Riders register list
-    match /riders/{uid} {
-      allow read, create, update: if isSignedIn();
+    match /riders/{riderId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isSignedIn() && riderIdMatchesAuth(riderId));
       allow delete: if isAdmin();
+    }
+
+    // 5. Users private addresses and subcollections
+    match /users/{userId} {
+      allow read, write: if request.auth != null && (request.auth.uid == userId || request.auth.token.email == 'himanshu712007@gmail.com');
+      
+      match /addresses/{addressId} {
+        allow read, write: if request.auth != null && (request.auth.uid == userId || request.auth.token.email == 'himanshu712007@gmail.com');
+      }
     }
   }
 }

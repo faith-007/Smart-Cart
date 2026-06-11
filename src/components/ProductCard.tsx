@@ -42,7 +42,7 @@ export default function ProductCard({
         
         {product.isBestOffer && (
           <span className="inline-flex items-center rounded-lg bg-yellow-400 px-2 py-1 text-[10px] font-black text-gray-900 shadow-xs uppercase">
-            Promo Deal
+            Super Saver
           </span>
         )}
       </div>

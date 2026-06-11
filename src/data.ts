@@ -1,4 +1,4 @@
-import { Category, Product, PromoCode, ComboDeal } from "./types";
+import { Category, Product, ComboDeal } from "./types";
 
 export const INITIAL_CATEGORIES: Category[] = [
   { id: "fruits", name: "Fruits", iconName: "Apple" },
@@ -416,12 +416,6 @@ export const INITIAL_PRODUCTS: Product[] = [
     rating: 4.9,
     ratingCount: 172,
   }
-];
-
-export const PROMO_CODES: PromoCode[] = [
-  { code: "SMART20", description: "Get ₹20 off on orders starting at ₹150", discountValue: 20, minimumOrder: 150 },
-  { code: "FRESH50", description: "Save ₹50 on healthy fruits & veggies (Min cart: ₹300)", discountValue: 50, minimumOrder: 300 },
-  { code: "HELLOSMART", description: "Special user welcome flat ₹100 discount (Min cart: ₹500)", discountValue: 100, minimumOrder: 500 },
 ];
 
 export const COMBO_DEALS: ComboDeal[] = [

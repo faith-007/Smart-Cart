@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { X, Plus, Minus, Trash2, Heart, Gift, ShoppingBag, ArrowRight, Percent, Info } from "lucide-react";
-import { CartItem, Product, PromoCode } from "../types";
-import { PROMO_CODES } from "../data";
+import { CartItem, Product } from "../types";
+import { calculatePricing } from "../lib/pricing";
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -11,8 +11,8 @@ interface CartDrawerProps {
   onRemoveItem: (p: Product) => void;
   onSaveForLater: (p: Product) => void;
   onProceedToCheckout: () => void;
-  appliedPromo: PromoCode | null;
-  onApplyPromo: (promo: PromoCode | null) => void;
+  appliedPromo?: any;
+  onApplyPromo?: any;
 }
 
 export default function CartDrawer({
@@ -23,52 +23,23 @@ export default function CartDrawer({
   onRemoveItem,
   onSaveForLater,
   onProceedToCheckout,
-  appliedPromo,
-  onApplyPromo,
 }: CartDrawerProps) {
-  const [couponInput, setCouponInput] = useState("");
-  const [couponError, setCouponError] = useState("");
-
   if (!isOpen) return null;
 
   // Pricing calculations
-  const subtotal = cartItems.reduce((acc, item) => acc + item.product.sellingPrice * item.quantity, 0);
-  
-  // Rule: Free delivery for orders above ₹200, otherwise ₹25
-  const deliveryCharge = subtotal > 200 || subtotal === 0 ? 0 : 25;
-  const platformFee = subtotal > 0 ? 2 : 0;
+  const {
+    subtotal,
+    deliveryCharge,
+    isFreeDelivery,
+    platformFee,
+    handlingCharge,
+    total: grandTotal,
+    progressMessage,
+  } = calculatePricing(
+    cartItems.reduce((acc, item) => acc + item.product.sellingPrice * item.quantity, 0)
+  );
 
-  let discount = 0;
-  if (appliedPromo) {
-    if (subtotal >= appliedPromo.minimumOrder) {
-      discount = appliedPromo.discountValue;
-    } else {
-      // Auto-remove promo if cart value drops below criteria
-      setTimeout(() => onApplyPromo(null), 50);
-    }
-  }
-
-  const grandTotal = Math.max(0, subtotal - discount + deliveryCharge + platformFee);
-
-  const handleApplyCouponCode = (code: string) => {
-    const promo = PROMO_CODES.find((p) => p.code.toUpperCase() === code.trim().toUpperCase());
-    if (!promo) {
-      setCouponError("Invalid Coupon Code! Try SMART20 or FRESH50.");
-      return;
-    }
-    if (subtotal < promo.minimumOrder) {
-      setCouponError(`Add items worth ₹${promo.minimumOrder - subtotal} more to apply this coupon.`);
-      return;
-    }
-    setCouponError("");
-    onApplyPromo(promo);
-  };
-
-  const handleRemoveCoupon = () => {
-    onApplyPromo(null);
-    setCouponInput("");
-    setCouponError("");
-  };
+  const discount = 0;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-xs">
@@ -97,11 +68,18 @@ export default function CartDrawer({
         </div>
 
         {/* Deliver Target Promise */}
-        <div className="bg-orange-50 px-4 py-2.5 flex items-center space-x-2 border-b border-orange-100">
-          <span className="text-[10px] bg-orange-500 text-white font-black px-1.5 py-0.5 rounded">⚡ 15 MINS</span>
-          <p className="text-[11px] font-bold text-orange-950">
-            {subtotal > 200 ? "Congrats! Free delivery is unlocked for this order." : `Add items worth ₹${200 - subtotal} more for Free Delivery!`}
-          </p>
+        <div className={`${isFreeDelivery ? "bg-green-50/70 border-green-150" : "bg-orange-50/70 border-orange-100"} px-4 py-2.5 border-b flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2`}>
+          <div className="flex items-center space-x-2">
+            <span className="text-[10px] bg-orange-500 text-white font-black px-1.5 py-0.5 rounded leading-none shrink-0">⚡ 15 MINS</span>
+            <p className={`text-[11px] font-bold ${isFreeDelivery ? "text-green-800" : "text-orange-950"}`}>
+              {progressMessage}
+            </p>
+          </div>
+          {isFreeDelivery && (
+            <span className="inline-flex items-center rounded-full bg-green-550/10 px-2.5 py-0.5 text-[9px] font-black text-green-750 uppercase tracking-wider">
+              FREE DELIVERY UNLOCKED
+            </span>
+          )}
         </div>
 
         {/* Cart Item List */}
@@ -189,120 +167,49 @@ export default function CartDrawer({
           )}
         </div>
 
-        {/* Promo Codes & Pricing Calculations footer */}
+        {/* Bill Summary & Pricing Calculations footer */}
         {cartItems.length > 0 && (
           <div className="border-t border-gray-100 bg-gray-50/70 p-4 space-y-3.5">
             
-            {/* Promo Code Input section */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] font-bold text-gray-400 uppercase">Apply Promo Coupons</span>
-                {appliedPromo && (
-                  <button onClick={handleRemoveCoupon} className="text-[10px] text-red-500 font-bold hover:underline">
-                    Remove
-                  </button>
-                )}
-              </div>
-
-              {appliedPromo ? (
-                <div className="flex items-center justify-between rounded-xl border border-green-200 bg-green-50/20 px-3 py-2 text-xs">
-                  <div className="flex items-center space-x-2">
-                    <Gift className="h-4.5 w-4.5 text-green-600 animate-bounce" />
-                    <div>
-                      <p className="font-extrabold text-green-950 tracking-wider">Coupon applied: {appliedPromo.code}</p>
-                      <p className="text-[10px] text-green-600 font-semibold">{appliedPromo.description}</p>
-                    </div>
-                  </div>
-                  <span className="font-extrabold text-green-700">-₹{appliedPromo.discountValue}</span>
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  <div className="flex space-x-2">
-                    <input
-                      type="text"
-                      className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-black uppercase text-gray-800 placeholder-gray-400 outline-hidden focus:border-green-500 focus:ring-1 focus:ring-green-500"
-                      placeholder="Enter code (e.g. SMART20, FRESH50)"
-                      value={couponInput}
-                      onChange={(e) => setCouponInput(e.target.value)}
-                    />
-                    <button
-                      onClick={() => handleApplyCouponCode(couponInput)}
-                      className="rounded-xl bg-gray-900 text-white font-black text-xs px-4 py-2 hover:bg-gray-800 transition"
-                    >
-                      Apply
-                    </button>
-                  </div>
-                  {couponError && <p className="text-[10px] font-bold text-red-500 px-1">{couponError}</p>}
-                </div>
-              )}
-
-              {/* Show available codes inline */}
-              {!appliedPromo && (
-                <div className="mt-2.5 flex gap-2 overflow-x-auto pb-1 scrollbar-none">
-                  {PROMO_CODES.map((promo) => {
-                    const isEligible = subtotal >= promo.minimumOrder;
-                    return (
-                      <button
-                        key={promo.code}
-                        onClick={() => {
-                          setCouponInput(promo.code);
-                          handleApplyCouponCode(promo.code);
-                        }}
-                        className={`flex flex-col items-start p-1.5 px-2.5 rounded-lg border text-left shrink-0 max-w-[170px] ${
-                          isEligible 
-                            ? "bg-white border-green-200 text-green-700 hover:bg-green-50/20" 
-                            : "bg-white/50 border-gray-150 text-gray-400"
-                        }`}
-                      >
-                        <span className="text-[10px] font-black tracking-wider uppercase">{promo.code}</span>
-                        <span className="text-[8px] font-semibold text-gray-400 uppercase mt-0.5">Min Cart: ₹{promo.minimumOrder}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-            </div>
-
             {/* Bill Summary List */}
             <div className="space-y-1.5 border-t border-gray-150 pt-3 text-xs font-medium text-gray-600">
               <div className="flex justify-between">
-                <span>Basket Subtotal</span>
+                <span>Subtotal</span>
                 <span className="font-extrabold text-gray-900">₹{subtotal}</span>
               </div>
-              
-              {discount > 0 && (
-                <div className="flex justify-between text-green-600">
-                  <span className="flex items-center">
-                    <Percent className="h-3 w-3 mr-1" />
-                    <span>Coupon Discount</span>
-                  </span>
-                  <span className="font-black">-₹{discount}</span>
-                </div>
-              )}
 
-              <div className="flex justify-between">
-                <span className="flex items-center">
+              <div className="flex justify-between items-center">
+                <span className="flex items-center gap-1.5">
                   <span>Delivery Charge</span>
-                  {deliveryCharge === 0 && (
-                    <span className="ml-1 px-1 bg-green-100 text-green-700 text-[8px] font-extrabold uppercase rounded-xs">Free</span>
+                  {isFreeDelivery && (
+                    <span id="free-delivery-badge-cart" className="inline-flex items-center rounded-xs bg-green-550/10 px-1 py-0.5 text-[8px] font-black text-green-750 uppercase tracking-widest leading-none">
+                      FREE DELIVERY
+                    </span>
                   )}
                 </span>
-                <span className="font-extrabold text-gray-900">
-                  {deliveryCharge > 0 ? `₹${deliveryCharge}` : "₹0"}
+                <span className={`font-extrabold ${isFreeDelivery ? "text-green-600" : "text-gray-900"}`}>
+                  {isFreeDelivery ? "FREE" : `₹${deliveryCharge}`}
                 </span>
               </div>
 
               <div className="flex justify-between">
                 <span className="flex items-center">
-                  <span>Small Order Platform Fee</span>
-                  <Info className="h-3 w-3 text-gray-400 ml-1" title="Platform investment fee" />
+                  <span>Platform Fee</span>
+                  <Info className="h-3 w-3 text-gray-400 ml-1" title="Platform support charge" />
                 </span>
                 <span className="font-extrabold text-gray-900">₹{platformFee}</span>
               </div>
 
+              <div className="flex justify-between">
+                <span className="flex items-center">
+                  <span>Handling Charge</span>
+                  <Info className="h-3 w-3 text-gray-400 ml-1" title="Safety & packing charges" />
+                </span>
+                <span className="font-extrabold text-gray-900">₹{handlingCharge}</span>
+              </div>
+
               <div className="flex justify-between border-t border-gray-205 pt-2 text-sm font-black text-gray-955">
-                <span>Grand Total</span>
+                <span>Total</span>
                 <span>₹{grandTotal}</span>
               </div>
             </div>

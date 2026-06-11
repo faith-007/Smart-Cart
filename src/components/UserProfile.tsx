@@ -13,6 +13,7 @@ import {
   EyeOff, 
   RefreshCw, 
   ShoppingBag, 
+  X, 
   Eye,
   Smartphone,
   Key,
@@ -33,6 +34,7 @@ import {
   fetchUserProfileFromFirebase, 
   fetchUserProfilesFromFirebase, 
   fetchRidersFromFirebase,
+  fetchSavedAddressesFromFirebase,
   auth
 } from "../lib/firebase";
 import { 
@@ -45,8 +47,9 @@ import {
 interface UserProfileProps {
   orders: Order[];
   savedAddresses: Address[];
-  onAddAddress: (addr: Omit<Address, "id">) => void;
+  onAddAddress: (addr: Omit<Address, "id"> | Address) => void;
   onRemoveAddress: (id: string) => void;
+  onSetDefaultAddress?: (id: string) => void;
   wishlist: Product[];
   onRemoveFromWishlist: (p: Product) => void;
   onAddToCart: (p: Product) => void;
@@ -61,6 +64,8 @@ interface UserProfileProps {
   isCustomerLoggedIn: boolean;
   onCustomerLogin: (phone: string, name: string, email: string, adrs: Address[]) => void;
   onCustomerLogout: () => void;
+  onUpdateOrderStatus?: (orderId: string, status: Order["status"]) => void;
+  onResetAddresses?: () => void;
 }
 
 export default function UserProfile({
@@ -68,6 +73,8 @@ export default function UserProfile({
   savedAddresses,
   onAddAddress,
   onRemoveAddress,
+  onSetDefaultAddress,
+  onResetAddresses,
   wishlist,
   onRemoveFromWishlist,
   onAddToCart,
@@ -82,6 +89,7 @@ export default function UserProfile({
   isCustomerLoggedIn,
   onCustomerLogin,
   onCustomerLogout,
+  onUpdateOrderStatus,
 }: UserProfileProps) {
   const currentUserId = auth.currentUser?.uid;
   const orders = React.useMemo(() => {
@@ -105,8 +113,31 @@ export default function UserProfile({
   }, [rawOrders, currentUserId]);
 
   const [subTab, setSubTab] = useState<"profile" | "history" | "addresses" | "settings">("history");
+  const [orderToCancel, setOrderToCancel] = useState<string | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handleCancelOrderClick = (orderId: string, currentStatus: Order["status"]) => {
+    console.log("[SmartCart Debug] Button Clicked: Cancel button clicked in Profile for order ID:", orderId);
+    if (currentStatus !== "placed") {
+      console.log("[SmartCart Debug] Cancel Action Blocked: Status is not 'placed'", currentStatus);
+      setErrorMessage("Only orders in 'placed' status can be cancelled.");
+      return;
+    }
+    
+    console.log("[SmartCart Debug] Cancel Function Started for order ID:", orderId);
+    setOrderToCancel(orderId);
+  };
   
   // --- Firebase Authenticaton Screen states ---
+  const randomPlaceholderName = React.useMemo(() => {
+    const list = [
+      "Liam", "Sophia", "Aarav", "Zara", "Vikram", "Emily", "Dev", "Ananya", 
+      "Rohan", "Siddharth", "Elena", "Marcus", "Kavya", "Arjun", "Kabir", "Neha"
+    ];
+    return list[Math.floor(Math.random() * list.length)];
+  }, []);
+
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [emailInput, setEmailInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
@@ -220,12 +251,15 @@ export default function UserProfile({
   }, [isCustomerLoggedIn, savedAddresses.length]);
 
   // Address add form
-  const [typeLabel, setTypeLabel] = useState<"Home" | "Work" | "Other">("Home");
+  const [typeLabel, setTypeLabel] = useState<"Home" | "Work" | "Other" >("Home");
   const [aName, setAName] = useState("");
-  const [aLine, setALine] = useState("");
+  const [aHouseFlatNumber, setAHouseFlatNumber] = useState("");
+  const [aStreet, setAStreet] = useState("");
   const [aCity, setACity] = useState("New Delhi");
+  const [aStateVal, setAStateVal] = useState("Delhi");
   const [aPincode, setAPincode] = useState("");
   const [aPhone, setAPhone] = useState("");
+  const [aIsDefault, setAIsDefault] = useState(false);
   const [addrError, setAddrError] = useState("");
   const [isDetecting, setIsDetecting] = useState(false);
 
@@ -254,20 +288,22 @@ export default function UserProfile({
           .then((res) => res.json())
           .then((data) => {
             if (data && data.display_name) {
-              setALine(data.display_name);
+              setAStreet(data.display_name);
               if (data.address) {
                 const cityVal = data.address.city || data.address.town || data.address.suburb || data.address.state_district || "New Delhi";
                 const pinVal = data.address.postcode || "";
+                const stateVal = data.address.state || "Delhi";
                 setACity(cityVal);
+                setAStateVal(stateVal);
                 if (pinVal) setAPincode(pinVal);
               }
             } else {
-              setALine(`Sector ${Math.floor(lat)} Area, Coordinates: Lat ${lat.toFixed(4)}, Lng ${lng.toFixed(4)}`);
+              setAStreet(`Sector ${Math.floor(lat)} Area, Coordinates: Lat ${lat.toFixed(4)}, Lng ${lng.toFixed(4)}`);
             }
           })
           .catch((err) => {
             console.error("[Profile Geolocation] OSM Lookup Failed:", err);
-            setALine(`Coordinates: Lat ${lat.toFixed(4)}, Lng ${lng.toFixed(4)}`);
+            setAStreet(`Coordinates: Lat ${lat.toFixed(4)}, Lng ${lng.toFixed(4)}`);
           })
           .finally(() => {
             setIsDetecting(false);
@@ -326,40 +362,86 @@ export default function UserProfile({
     }
   };
 
+  const [editingAddressId, setEditingAddressId] = useState<string | null>(null);
+
+  const handleStartEditAddress = (addr: Address) => {
+    setEditingAddressId(addr.id);
+    setAName(addr.name || addr.fullName || "");
+    setAHouseFlatNumber(addr.houseFlatNumber || addr.addressLine.split(",")[0]?.trim() || "");
+    setAStreet(addr.street || addr.addressLine.split(",").slice(1).join(",")?.trim() || addr.addressLine || "");
+    setACity(addr.city || "New Delhi");
+    setAStateVal(addr.state || "Delhi");
+    setAPincode(addr.pincode || "");
+    setAPhone((addr.phone || addr.phoneNumber || "").replace("+91 ", ""));
+    setTypeLabel(addr.label || "Home");
+    setAIsDefault(!!addr.isDefault);
+    const element = document.getElementById("address-form-header");
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingAddressId(null);
+    setAName("");
+    setAHouseFlatNumber("");
+    setAStreet("");
+    setACity("New Delhi");
+    setAStateVal("Delhi");
+    setAPincode("");
+    setAPhone("");
+    setAIsDefault(false);
+    setTypeLabel("Home");
+  };
+
   const handleAddNewAddress = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!aName || !aLine || !aPincode || !aPhone) {
+    if (!aName.trim() || !aHouseFlatNumber.trim() || !aStreet.trim() || !aCity.trim() || !aPincode.trim() || !aPhone.trim() || !aStateVal.trim()) {
       setAddrError("Please complete all requested address coordinates.");
       return;
     }
+    if (aPhone.replace(/\D/g, "").length < 10) {
+      setAddrError("Please enter a valid 10-digit mobile number.");
+      return;
+    }
+
+    const currentEditingRecord = editingAddressId 
+      ? savedAddresses.find(a => a.id === editingAddressId) 
+      : null;
+
+    const cleanedPhone = aPhone.startsWith("+91 ") ? aPhone : ("+91 " + aPhone.replace(/\D/g, "").slice(-10));
+    const combinedAddress = `${aHouseFlatNumber.trim()}, ${aStreet.trim()}`;
 
     const addedAddressRecord: Address = {
-      id: `addr-${Date.now()}`,
+      id: editingAddressId || `addr-${Date.now()}`,
       label: typeLabel,
-      name: aName,
-      addressLine: aLine,
-      city: aCity,
-      pincode: aPincode,
-      phone: aPhone,
+      name: aName.trim(),
+      addressLine: combinedAddress,
+      city: aCity.trim(),
+      pincode: aPincode.trim(),
+      phone: cleanedPhone,
+      isDefault: currentEditingRecord ? currentEditingRecord.isDefault : (aIsDefault || savedAddresses.length === 0),
+      fullName: aName.trim(),
+      phoneNumber: cleanedPhone,
+      houseFlatNumber: aHouseFlatNumber.trim(),
+      street: aStreet.trim(),
+      landmark: typeLabel,
+      state: aStateVal.trim(),
+      createdAt: currentEditingRecord?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
 
     onAddAddress(addedAddressRecord);
 
-    if (isCustomerLoggedIn && auth.currentUser) {
-      const updatedAdrs = [...savedAddresses, addedAddressRecord];
-      await syncUserProfileToFirebase({
-        userId: auth.currentUser.uid,
-        phone: userPhone,
-        name: userName,
-        email: userEmail,
-        addresses: updatedAdrs,
-      });
-    }
-
+    setEditingAddressId(null);
     setAName("");
-    setALine("");
+    setAHouseFlatNumber("");
+    setAStreet("");
+    setACity("New Delhi");
+    setAStateVal("Delhi");
     setAPincode("");
     setAPhone("");
+    setAIsDefault(false);
     setAddrError("");
   };
 
@@ -490,8 +572,17 @@ export default function UserProfile({
         
         setLoginSuccess(`Welcome back, ${profile.name}! Opening smart console...`);
         
+        let fetchedAddresses: Address[] = [];
+        try {
+          fetchedAddresses = await fetchSavedAddressesFromFirebase(user.uid);
+        } catch (e) {
+          console.warn("Could not fetch addresses on login:", e);
+          fetchedAddresses = profile.addresses || [];
+        }
+        
+        const finalAdrs = fetchedAddresses;
         setTimeout(() => {
-          onCustomerLogin(profile.phone || "", profile.name, profile.email, profile.addresses);
+          onCustomerLogin(profile.phone || "", profile.name, profile.email, finalAdrs);
           setAuthLoading(false);
         }, 1250);
       } catch (err: any) {
@@ -669,8 +760,16 @@ export default function UserProfile({
       await syncUserProfileToFirebase(profile);
       setLoginSuccess(`Account successfully created! Welcome to SmartCart, ${profile.name}.`);
 
+      let fetchedAddresses: Address[] = [];
+      try {
+        fetchedAddresses = await fetchSavedAddressesFromFirebase(user.uid);
+      } catch (e) {
+        fetchedAddresses = profile.addresses || [];
+      }
+      
+      const finalAdrs = fetchedAddresses;
       setTimeout(() => {
-        onCustomerLogin(profile.phone, profile.name, profile.email, profile.addresses);
+        onCustomerLogin(profile.phone, profile.name, profile.email, finalAdrs);
         setAuthLoading(false);
       }, 1250);
 
@@ -843,7 +942,7 @@ export default function UserProfile({
                         <input
                           type="text"
                           required
-                          placeholder="e.g. Himanshu"
+                          placeholder={`e.g. ${randomPlaceholderName}`}
                           className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold focus:ring-1 focus:ring-green-500 outline-hidden"
                           value={nameInput}
                           onChange={(e) => setNameInput(e.target.value)}
@@ -945,6 +1044,9 @@ export default function UserProfile({
                           onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ""))}
                         />
                       </div>
+                      <p className="text-[10px] text-gray-500 mt-2 bg-gray-55 p-2 rounded-xl border border-gray-150 leading-relaxed text-left">
+                        Didn't receive the OTP? Please check your Spam/Junk folder. OTP emails may sometimes be filtered there.
+                      </p>
                     </div>
 
                     {/* Resend button block */}
@@ -1118,101 +1220,278 @@ export default function UserProfile({
           <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-xs min-h-[480px]">
             
             {/* ================= ORDER HISTORY TAB ================= */}
-            {subTab === "history" && (
-              <div className="space-y-6 text-left animate-in fade-in duration-200">
-                <div>
-                  <h2 className="text-base font-black text-gray-900 uppercase tracking-wider">Purchase Order Register</h2>
-                  <p className="text-xs text-gray-400 font-semibold uppercase mt-0.5">Track arrivals and reorder past favorites</p>
-                </div>
+            {subTab === "history" && (() => {
+              const activeOrders = orders.filter((o) => o.status !== "delivered" && o.status !== "cancelled");
+              const pastOrders = orders.filter((o) => o.status === "delivered" || o.status === "cancelled");
+              
+              return (
+                <div className="space-y-6 text-left animate-in fade-in duration-200">
+                  <div>
+                    <h2 className="text-base font-black text-gray-900 uppercase tracking-wider">Purchase Order Register</h2>
+                    <p className="text-xs text-gray-400 font-semibold uppercase mt-0.5">Track arrivals and reorder past favorites</p>
+                  </div>
 
-                {orders.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center p-12 text-center border-2 border-dashed border-gray-100 rounded-3xl">
-                    <div className="h-14 w-14 bg-gray-50 rounded-full flex items-center justify-center mb-3">
-                      <Package className="h-7 w-7 text-gray-300" />
+                  {orders.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center p-12 text-center border-2 border-dashed border-gray-100 rounded-3xl">
+                      <div className="h-14 w-14 bg-gray-50 rounded-full flex items-center justify-center mb-3">
+                        <Package className="h-7 w-7 text-gray-300" />
+                      </div>
+                      <h3 className="text-sm font-bold text-gray-800">No Orders Logged Yet</h3>
+                      <p className="text-xs text-gray-400 mt-1 max-w-[240px]">Place your first grocery delivery order to experience 15 minute arrivals!</p>
                     </div>
-                    <h3 className="text-sm font-bold text-gray-800">No Orders Logged Yet</h3>
-                    <p className="text-xs text-gray-400 mt-1 max-w-[240px]">Place your first grocery delivery order to experience 15 minute arrivals!</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {orders.map((ord) => {
-                      const isLive = ord.status !== "delivered";
-                      return (
-                        <div key={ord.id} className="border border-gray-100 rounded-2xl p-4 hover:border-gray-200 transition bg-gray-50/20">
+                  ) : (
+                    <div className="space-y-6">
+                      
+                      {/* Active Deliveries */}
+                      {activeOrders.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-black text-gray-500 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                            <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse inline-block" />
+                            <span>Active Deliveries ({activeOrders.length})</span>
+                          </h3>
                           
-                          {/* Order Meta row */}
-                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-50 pb-3 mb-3">
-                            <div>
-                              <p className="text-xs font-black text-gray-900">Order ID: #{ord.id}</p>
-                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">{ord.date} • {ord.paymentMethod}</p>
-                            </div>
+                          <div className="space-y-4">
+                            {activeOrders.map((ord) => {
+                              const isLive = ord.status !== "delivered" && ord.status !== "cancelled";
+                              return (
+                                <div key={ord.id} className="border border-orange-100 rounded-2xl p-4 hover:border-orange-200 transition bg-orange-50/5">
+                                  
+                                  {/* Order Meta row */}
+                                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3 mb-3">
+                                    <div>
+                                      <p className="text-xs font-black text-gray-900">Order ID: #{ord.id}</p>
+                                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">{ord.date} • {ord.paymentMethod}</p>
+                                    </div>
 
-                            <div className="flex items-center space-x-2">
-                              <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase ${
-                                ord.status === "delivered" 
-                                  ? "bg-green-100 text-green-700" 
-                                  : "bg-orange-100 text-orange-700 animate-pulse"
-                              }`}>
-                                {ord.status === "delivered" ? "Delivered" : "Express Transiting"}
-                              </span>
+                                    <div className="flex items-center space-x-2">
+                                      <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase bg-orange-100 text-orange-700 animate-pulse">
+                                        Express Transiting
+                                      </span>
 
-                              {isLive && (
-                                <button
-                                  onClick={() => onTrackOrder(ord)}
-                                  className="flex items-center space-x-1 rounded-lg bg-green-500 text-white font-black text-[10px] uppercase p-1.5 transition hover:bg-green-600"
-                                >
-                                  <Navigation className="h-3 w-3 fill-white" />
-                                  <span>Live Track</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
+                                      {isLive && (
+                                        <button
+                                          onClick={() => onTrackOrder(ord)}
+                                          className="flex items-center space-x-1 rounded-lg bg-green-500 text-white font-black text-[10px] uppercase p-1.5 transition hover:bg-green-600"
+                                        >
+                                          <Navigation className="h-3 w-3 fill-white" />
+                                          <span>Live Track</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
 
-                          {/* Order Products mapping list */}
-                          <div className="space-y-2 mb-3 max-h-36 overflow-y-auto">
-                            {ord.items.map((it) => (
-                              <div key={it.product.id} className="flex items-center justify-between text-xs font-medium">
-                                <div className="flex items-center space-x-2">
-                                  <img src={it.product.image} alt={it.product.name} className="h-6 w-6 rounded object-cover" />
-                                  <span className="text-gray-850 font-bold truncate max-w-[200px]">{it.product.name}</span>
-                                  <span className="text-[10px] text-gray-400">({it.product.weight})</span>
+                                  {/* Order Products mapping list */}
+                                  <div className="space-y-2 mb-3 max-h-36 overflow-y-auto border-b border-gray-100 pb-2">
+                                    {ord.items.map((it) => (
+                                      <div key={it.product.id} className="flex items-center justify-between text-xs font-medium">
+                                        <div className="flex items-center space-x-2">
+                                          <img src={it.product.image} alt={it.product.name} className="h-6 w-6 rounded object-cover" />
+                                          <span className="text-gray-850 font-bold truncate max-w-[200px]">{it.product.name}</span>
+                                          <span className="text-[10px] text-gray-400">({it.product.weight})</span>
+                                        </div>
+                                        <span className="text-gray-500">Qty: {it.quantity} • <strong className="text-gray-800">₹{it.product.sellingPrice * it.quantity}</strong></span>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  {/* Pricing breakdown summary segment */}
+                                  <div className="bg-gray-50 border border-gray-100 rounded-xl p-2.5 text-[10px] font-medium text-gray-500 space-y-1 mb-2">
+                                    <div className="flex justify-between">
+                                      <span>Subtotal:</span>
+                                      <span className="font-bold text-gray-755">₹{ord.subtotal}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                      <span className="flex items-center gap-1">
+                                        <span>Delivery Charge:</span>
+                                        {ord.deliveryCharge === 0 && (
+                                          <span className="px-1 bg-green-100 text-[7px] font-extrabold text-green-700 uppercase rounded">FREE DELIVERY</span>
+                                        )}
+                                      </span>
+                                      <span className={ord.deliveryCharge === 0 ? "font-black text-green-600" : "font-bold text-gray-750"}>
+                                        {ord.deliveryCharge === 0 ? "FREE" : `₹${ord.deliveryCharge}`}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>Platform Fee:</span>
+                                      <span className="font-bold text-gray-750">₹{ord.platformFee ?? 3}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>Handling Charge:</span>
+                                      <span className="font-bold text-gray-750">₹{ord.handlingCharge ?? 10}</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Order summary calculations CTA reorder */}
+                                  <div className="border-t border-gray-100 pt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                                    <div className="text-left">
+                                      <p className="text-[10px] text-gray-400 font-semibold uppercase leading-none">Delivered to</p>
+                                      <p className="font-bold text-gray-850 mt-1 capitalize leading-none">{ord.address.label} ({ord.address.name})</p>
+                                    </div>
+
+                                    <div className="flex items-center space-x-4">
+                                      <div>
+                                        <p className="text-[9px] text-gray-400 font-semibold uppercase text-right leading-none">Total Value</p>
+                                        <p className="text-sm font-black text-gray-900 mt-1 leading-none">₹{ord.total}</p>
+                                      </div>
+
+                                      {ord.status === "placed" && (
+                                        <button
+                                          id={`smartcart-cancel-button-profile-active-${ord.id}`}
+                                          onClick={() => handleCancelOrderClick(ord.id, ord.status)}
+                                          className="group flex items-center justify-center gap-1.5 px-3.5 py-2 border border-red-200 hover:border-red-300 bg-red-50 hover:bg-red-100 text-red-650 hover:text-red-700 font-extrabold text-[10px] uppercase rounded-xl tracking-wider transition duration-300 hover:shadow-xs active:scale-95 cursor-pointer animate-pulse"
+                                        >
+                                          <X className="h-3.5 w-3.5 text-red-500 group-hover:rotate-90 transition-transform duration-300" />
+                                          <span>Cancel Order</span>
+                                        </button>
+                                      )}
+
+                                      <button
+                                        onClick={() => onReorder(ord)}
+                                        className="flex items-center space-x-1.5 rounded-lg border border-green-500 bg-white hover:bg-green-500 hover:text-white text-green-600 font-extrabold p-2 transition active:scale-95 cursor-pointer"
+                                      >
+                                        <RefreshCw className="h-3.5 w-3.5" />
+                                        <span className="text-[10px] uppercase">Instant Reorder</span>
+                                      </button>
+                                    </div>
+                                  </div>
+
                                 </div>
-                                <span className="text-gray-500">Qty: {it.quantity} • <strong className="text-gray-800">₹{it.product.sellingPrice * it.quantity}</strong></span>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
-
-                          {/* Order summary calculations CTA reorder */}
-                          <div className="border-t border-gray-50 pt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-                            <div className="text-left">
-                              <p className="text-[10px] text-gray-400 font-semibold uppercase leading-none">Delivered to</p>
-                              <p className="font-bold text-gray-850 mt-1 capitalize leading-none">{ord.address.label} ({ord.address.name})</p>
-                            </div>
-
-                            <div className="flex items-center space-x-4">
-                              <div>
-                                <p className="text-[9px] text-gray-400 font-semibold uppercase text-right leading-none">Total Value</p>
-                                <p className="text-sm font-black text-gray-900 mt-1 leading-none">₹{ord.total}</p>
-                              </div>
-
-                              <button
-                                onClick={() => onReorder(ord)}
-                                className="flex items-center space-x-1.5 rounded-lg border border-green-500 bg-white hover:bg-green-500 hover:text-white text-green-600 font-extrabold p-2 transition active:scale-95"
-                              >
-                                <RefreshCw className="h-3.5 w-3.5" />
-                                <span className="text-[10px] uppercase">Instant Reorder</span>
-                              </button>
-                            </div>
-                          </div>
-
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
+                      )}
 
-              </div>
-            )}
+                      {/* Order History */}
+                      {pastOrders.length > 0 && (
+                        <div>
+                          <h3 className="text-xs font-black text-gray-450 uppercase tracking-wider mb-3 mt-2 flex items-center gap-1.5">
+                            <Package className="h-4 w-4" />
+                            <span>Order History ({pastOrders.length})</span>
+                          </h3>
+                          
+                          <div className="space-y-4">
+                            {pastOrders.map((ord) => {
+                              const isLive = ord.status !== "delivered" && ord.status !== "cancelled";
+                              return (
+                                <div key={ord.id} className="border border-gray-150 rounded-2xl p-4 hover:border-gray-200 transition bg-gray-50/20">
+                                  
+                                  {/* Order Meta row */}
+                                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3 mb-3">
+                                    <div>
+                                      <p className="text-xs font-black text-gray-900">Order ID: #{ord.id}</p>
+                                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">{ord.date} • {ord.paymentMethod}</p>
+                                    </div>
+
+                                    <div className="flex items-center space-x-2">
+                                      <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase ${
+                                        ord.status === "delivered" 
+                                          ? "bg-green-100 text-green-700" 
+                                          : "bg-red-100 text-red-700"
+                                      }`}>
+                                        {ord.status === "delivered" ? "Delivered" : "Cancelled"}
+                                      </span>
+
+                                      {isLive && (
+                                        <button
+                                          onClick={() => onTrackOrder(ord)}
+                                          className="flex items-center space-x-1 rounded-lg bg-green-500 text-white font-black text-[10px] uppercase p-1.5 transition hover:bg-green-600"
+                                        >
+                                          <Navigation className="h-3 w-3 fill-white" />
+                                          <span>Live Track</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Order Products mapping list */}
+                                  <div className="space-y-2 mb-3 max-h-36 overflow-y-auto border-b border-gray-100 pb-2">
+                                    {ord.items.map((it) => (
+                                      <div key={it.product.id} className="flex items-center justify-between text-xs font-medium">
+                                        <div className="flex items-center space-x-2">
+                                          <img src={it.product.image} alt={it.product.name} className="h-6 w-6 rounded object-cover" />
+                                          <span className="text-gray-850 font-bold truncate max-w-[200px]">{it.product.name}</span>
+                                          <span className="text-[10px] text-gray-400">({it.product.weight})</span>
+                                        </div>
+                                        <span className="text-gray-500">Qty: {it.quantity} • <strong className="text-gray-800">₹{it.product.sellingPrice * it.quantity}</strong></span>
+                                      </div>
+                                    ))}
+                                  </div>
+
+                                  {/* Pricing breakdown summary segment */}
+                                  <div className="bg-gray-50 border border-gray-100 rounded-xl p-2.5 text-[10px] font-medium text-gray-500 space-y-1 mb-2">
+                                    <div className="flex justify-between">
+                                      <span>Subtotal:</span>
+                                      <span className="font-bold text-gray-755">₹{ord.subtotal}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                      <span className="flex items-center gap-1">
+                                        <span>Delivery Charge:</span>
+                                        {ord.deliveryCharge === 0 && (
+                                          <span className="px-1 bg-green-100 text-[7px] font-extrabold text-green-700 uppercase rounded">FREE DELIVERY</span>
+                                        )}
+                                      </span>
+                                      <span className={ord.deliveryCharge === 0 ? "font-black text-green-600" : "font-bold text-gray-750"}>
+                                        {ord.deliveryCharge === 0 ? "FREE" : `₹${ord.deliveryCharge}`}
+                                      </span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>Platform Fee:</span>
+                                      <span className="font-bold text-gray-750">₹{ord.platformFee ?? 3}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                      <span>Handling Charge:</span>
+                                      <span className="font-bold text-gray-750">₹{ord.handlingCharge ?? 10}</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Order summary calculations CTA reorder */}
+                                  <div className="border-t border-gray-100 pt-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                                    <div className="text-left">
+                                      <p className="text-[10px] text-gray-400 font-semibold uppercase leading-none">Delivered to</p>
+                                      <p className="font-bold text-gray-850 mt-1 capitalize leading-none">{ord.address.label} ({ord.address.name})</p>
+                                    </div>
+
+                                    <div className="flex items-center space-x-4">
+                                      <div>
+                                        <p className="text-[9px] text-gray-400 font-semibold uppercase text-right leading-none">Total Value</p>
+                                        <p className="text-sm font-black text-gray-900 mt-1 leading-none">₹{ord.total}</p>
+                                      </div>
+
+                                      {ord.status === "placed" && (
+                                        <button
+                                          id={`smartcart-cancel-button-profile-past-${ord.id}`}
+                                          onClick={() => handleCancelOrderClick(ord.id, ord.status)}
+                                          className="group flex items-center justify-center gap-1.5 px-3.5 py-2 border border-red-200 hover:border-red-300 bg-red-50 hover:bg-red-100 text-red-650 hover:text-red-700 font-extrabold text-[10px] uppercase rounded-xl tracking-wider transition duration-300 hover:shadow-xs active:scale-95 cursor-pointer animate-pulse"
+                                        >
+                                          <X className="h-3.5 w-3.5 text-red-500 group-hover:rotate-90 transition-transform duration-300" />
+                                          <span>Cancel Order</span>
+                                        </button>
+                                      )}
+
+                                      <button
+                                        onClick={() => onReorder(ord)}
+                                        className="flex items-center space-x-1.5 rounded-lg border border-green-500 bg-white hover:bg-green-500 hover:text-white text-green-600 font-extrabold p-2 transition active:scale-95 cursor-pointer"
+                                      >
+                                        <RefreshCw className="h-3.5 w-3.5" />
+                                        <span className="text-[10px] uppercase">Instant Reorder</span>
+                                      </button>
+                                    </div>
+                                  </div>
+
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                    </div>
+                  )}
+
+                </div>
+              );
+            })()}
 
             {/* ================= PERSONAL DETAIL TAB ================= */}
             {subTab === "profile" && (
@@ -1301,29 +1580,65 @@ export default function UserProfile({
             {/* ================= SAVED ADDRESSES TAB ================= */}
             {subTab === "addresses" && (
               <div className="space-y-6 text-left animate-in fade-in duration-200">
-                <div>
-                  <h2 className="text-base font-black text-gray-900 uppercase tracking-wider">Address Book Coordinates</h2>
-                  <p className="text-xs text-gray-400 font-semibold uppercase mt-0.5">Delivery endpoints used during ordering</p>
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <div>
+                    <h2 className="text-base font-black text-gray-900 uppercase tracking-wider">Address Book Coordinates</h2>
+                    <p className="text-xs text-gray-400 font-semibold uppercase mt-0.5">Delivery endpoints used during ordering</p>
+                  </div>
+                  {onResetAddresses && savedAddresses.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowResetConfirm(true);
+                      }}
+                      className="px-3 py-1.5 bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 rounded-xl text-xs font-bold tracking-tight transition cursor-pointer"
+                    >
+                      Reset Register
+                    </button>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {savedAddresses.map((addr) => (
                     <div key={addr.id} className="p-4 border border-gray-150 rounded-2xl bg-gray-50/20 text-left relative">
-                      <span className="text-[9px] bg-green-500 text-white font-black px-1.5 py-0.5 rounded uppercase absolute top-4 right-4">
-                        {addr.label}
-                      </span>
+                      <div className="absolute top-4 right-4 flex items-center gap-1.5">
+                        {addr.isDefault && (
+                          <span className="text-[8px] bg-amber-500 font-extrabold text-white px-1.5 py-0.5 rounded uppercase">
+                            Default
+                          </span>
+                        )}
+                        <span className="text-[9px] bg-green-500 text-white font-black px-1.5 py-0.5 rounded uppercase">
+                          {addr.label}
+                        </span>
+                      </div>
 
                       <h4 className="text-xs font-bold text-gray-800">{addr.name}</h4>
                       <p className="text-xs text-gray-400 leading-normal mt-1.5 font-medium">{addr.addressLine}</p>
-                      <p className="text-[10px] font-bold text-gray-405 mt-1">{addr.city} • {addr.pincode}</p>
+                      <p className="text-[10px] font-bold text-gray-450 mt-1">{addr.city} • {addr.pincode}</p>
                       <p className="text-[10px] font-semibold text-gray-400 mt-0.5">Phone: {addr.phone}</p>
                       
-                      <button
-                        onClick={() => onRemoveAddress(addr.id)}
-                        className="text-[10px] font-bold text-red-500 hover:underline mt-2.5 block"
-                      >
-                        Delete Address
-                      </button>
+                      <div className="flex items-center gap-3.5 mt-3 border-t border-gray-100 pt-2.5">
+                        <button
+                          onClick={() => handleStartEditAddress(addr)}
+                          className="text-[10px] font-bold text-green-600 hover:underline cursor-pointer"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => onRemoveAddress(addr.id)}
+                          className="text-[10px] font-bold text-red-500 hover:underline cursor-pointer"
+                        >
+                          Delete
+                        </button>
+                        {!addr.isDefault && onSetDefaultAddress && (
+                          <button
+                            onClick={() => onSetDefaultAddress(addr.id)}
+                            className="text-[10px] font-bold text-gray-550 hover:underline cursor-pointer ml-auto"
+                          >
+                            Set Default
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1331,7 +1646,9 @@ export default function UserProfile({
                 {/* Inline form to add additional coordinates */}
                 <form onSubmit={handleAddNewAddress} className="mt-8 border-t border-gray-50 pt-5 space-y-4 max-w-lg">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-black text-gray-600 uppercase tracking-wider">Add Additional Address</h3>
+                    <h3 id="address-form-header" className="text-xs font-black text-gray-600 uppercase tracking-wider">
+                      {editingAddressId ? "Edit Address Coordinates" : "Add Additional Address"}
+                    </h3>
                     <button
                       type="button"
                       onClick={handleDetectLocationInProfile}
@@ -1396,16 +1713,27 @@ export default function UserProfile({
                         onChange={(e) => setAPhone(e.target.value.replace(/\D/g, ""))}
                       />
                     </div>
-
-                    <div className="col-span-2">
-                      <label className="text-[9px] font-bold text-gray-400 uppercase">House / Office / Street lines *</label>
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-400 uppercase">House / Flat / Floor Number *</label>
                       <input
                         type="text"
                         required
                         className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold focus:border-green-500 focus:ring-1 focus:ring-green-500"
-                        placeholder="House/flat no., street landmarks"
-                        value={aLine}
-                        onChange={(e) => setALine(e.target.value)}
+                        placeholder="e.g. Flat 302, 3rd Floor"
+                        value={aHouseFlatNumber}
+                        onChange={(e) => setAHouseFlatNumber(e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-400 uppercase">Street Row / Sector / Area *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                        placeholder="e.g. Cyber City, Sector 24"
+                        value={aStreet}
+                        onChange={(e) => setAStreet(e.target.value)}
                       />
                     </div>
 
@@ -1414,9 +1742,20 @@ export default function UserProfile({
                       <input
                         type="text"
                         required
-                        className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold"
+                        className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold focus:border-green-500 focus:ring-1 focus:ring-green-500"
                         value={aCity}
                         onChange={(e) => setACity(e.target.value)}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[9px] font-bold text-gray-400 uppercase">State *</label>
+                      <input
+                        type="text"
+                        required
+                        className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                        value={aStateVal}
+                        onChange={(e) => setAStateVal(e.target.value)}
                       />
                     </div>
 
@@ -1425,22 +1764,47 @@ export default function UserProfile({
                       <input
                         type="text"
                         required
-                        className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold"
+                        className="w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-semibold focus:border-green-500 focus:ring-1 focus:ring-green-500"
                         placeholder="6 digits area pin"
+                        maxLength={6}
                         value={aPincode}
                         onChange={(e) => setAPincode(e.target.value.replace(/\D/g, ""))}
                       />
+                    </div>
+
+                    <div className="col-span-2 flex items-center space-x-2 mt-1">
+                      <input
+                        type="checkbox"
+                        id="user-profile-default-checkbox"
+                        checked={aIsDefault}
+                        onChange={(e) => setAIsDefault(e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-green-500 focus:ring-green-500 cursor-pointer"
+                      />
+                      <label htmlFor="user-profile-default-checkbox" className="text-xs font-bold text-gray-650 cursor-pointer select-none">
+                        Set as Default Address
+                      </label>
                     </div>
                   </div>
 
                   {addrError && <p className="text-[10px] font-bold text-red-500">{addrError}</p>}
 
-                  <button
-                    type="submit"
-                    className="px-5 py-2 bg-green-500 hover:bg-green-600 text-white font-black text-xs rounded-xl transition"
-                  >
-                    Add Address Card
-                  </button>
+                  <div className="flex items-center gap-3 pt-1">
+                    <button
+                      type="submit"
+                      className="px-5 py-2 bg-green-500 hover:bg-green-600 text-white font-black text-xs rounded-xl transition cursor-pointer"
+                    >
+                      {editingAddressId ? "Update Address Card" : "Add Address Card"}
+                    </button>
+                    {editingAddressId && (
+                      <button
+                        type="button"
+                        onClick={handleCancelEdit}
+                        className="px-4 py-2 border border-gray-200 text-gray-700 hover:bg-gray-50 font-bold text-xs rounded-xl transition cursor-pointer"
+                      >
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
                 </form>
 
               </div>
@@ -1546,6 +1910,101 @@ export default function UserProfile({
         </div>
 
       </div>
+
+      {/* CONFIRM ORDER CANCELLATION MODAL */}
+      {orderToCancel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in text-left">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 flex flex-col items-center text-center">
+            <div className="h-12 w-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4">
+              <span className="text-xl font-bold">!</span>
+            </div>
+            <h3 className="text-base font-black text-gray-900 uppercase tracking-tight mb-2">Cancel Active Order</h3>
+            <p className="text-xs text-gray-400 font-semibold mb-1">ORDER ID: {orderToCancel}</p>
+            <p className="text-xs text-gray-500 leading-relaxed mb-6 font-medium p-1">
+              Are you sure you want to cancel this order? This action will immediately retract rider assignments and delete any currently active tracking beacons.
+            </p>
+            <div className="flex items-center gap-3 w-full">
+              <button
+                type="button"
+                onClick={() => setOrderToCancel(null)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-750 font-bold text-xs rounded-xl transition uppercase tracking-wider cursor-pointer"
+              >
+                Keep Order
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  console.log("[SmartCart Debug] Confirmation Success: Dispatching status change to 'cancelled'...");
+                  onUpdateOrderStatus?.(orderToCancel, "cancelled");
+                  setOrderToCancel(null);
+                }}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs rounded-xl shadow-md uppercase tracking-wider transition cursor-pointer"
+              >
+                Cancel Order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRM ADDRESS BOOK RESET MODAL */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in text-left">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 flex flex-col items-center text-center">
+            <div className="h-12 w-12 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4">
+              <span className="text-xl font-bold">!</span>
+            </div>
+            <h3 className="text-base font-black text-gray-900 uppercase tracking-tight mb-2">Reset Address Book</h3>
+            <p className="text-xs text-gray-550 leading-relaxed mb-6 font-medium">
+              Are you sure you want to reset your entirely saved address register? This will delete all saved addresses permanently.
+            </p>
+            <div className="flex items-center gap-3 w-full">
+              <button
+                type="button"
+                onClick={() => setShowResetConfirm(false)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-750 font-bold text-xs rounded-xl transition uppercase tracking-wider cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onResetAddresses) {
+                    onResetAddresses();
+                  }
+                  setShowResetConfirm(false);
+                }}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-extrabold text-xs rounded-xl shadow-md uppercase tracking-wider transition cursor-pointer"
+              >
+                Reset Register
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ERROR MESSAGE / INFO MODAL */}
+      {errorMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in text-left">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-gray-100 flex flex-col items-center text-center">
+            <div className="h-12 w-12 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center mb-4">
+              <span className="text-xl font-bold">i</span>
+            </div>
+            <h3 className="text-base font-black text-gray-900 uppercase tracking-tight mb-2">Action Blocked</h3>
+            <p className="text-xs text-gray-550 leading-relaxed mb-6 font-medium">
+              {errorMessage}
+            </p>
+            <button
+              type="button"
+              onClick={() => setErrorMessage(null)}
+              className="w-full py-2.5 bg-gray-900 hover:bg-gray-800 text-white font-bold text-xs rounded-xl transition uppercase tracking-wider cursor-pointer"
+            >
+              Okay
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

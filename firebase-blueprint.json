@@ -171,6 +171,25 @@
         }
       },
       "required": ["id", "name", "phone", "email", "password", "vehicleNumber"]
+    },
+    "UserAddress": {
+      "title": "User Address",
+      "description": "User saved address details, permanent and private to their account",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "houseFlatNumber": { "type": "string" },
+        "street": { "type": "string" },
+        "landmark": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "pincode": { "type": "string" },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "phoneNumber", "houseFlatNumber", "street", "city", "pincode", "isDefault"]
     }
   },
   "firestore": {
@@ -185,6 +204,10 @@
     "/riders/{riderId}": {
       "schema": "Rider",
       "description": "Collection storing all admin created rider accounts"
+    },
+    "/users/{userId}/addresses/{addressId}": {
+      "schema": "UserAddress",
+      "description": "Subcollection under user's private document containing their saved addresses"
     }
   }
 }

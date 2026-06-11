@@ -8,7 +8,6 @@ interface Banner {
   title: string;
   subtitle: string;
   highlightText: string;
-  couponCode: string;
   colorClass: string;
   imgUrl: string;
 }
@@ -19,20 +18,18 @@ const BANNERS: Banner[] = [
     tagline: "⚡ 15-MINUTE FAST DELIVERY GUARANTEE",
     title: "Fresh Groceries Delivered in a Flash",
     subtitle: "From farm-fresh organic vegetables to dairy essentials, get everything delivered to your doorstep in 15 minutes flat.",
-    highlightText: "FLAT ₹100 OFF on your first purchase",
-    couponCode: "HELLOSMART",
+    highlightText: "Quality products at affordable prices",
     colorClass: "from-green-600 to-emerald-800",
-    imgUrl: "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=600",
+    imgUrl: "images/grocery.jpg",
   },
   {
     id: "b2",
     tagline: "🍎 HEALTHY SUMMER HARVEST SPECIAL",
     title: "Organic Fruits & Vegetables up to 40% Off",
     subtitle: "Sourced directly from local sustainable farms. Sweet mangoes, crisp gala apples, and pure green spinach ready to deliver.",
-    highlightText: "Save ₹50 extra using organic promo",
-    couponCode: "FRESH50",
+    highlightText: "Farm-to-table freshness guaranteed",
     colorClass: "from-orange-500 to-red-600",
-    imgUrl: "https://images.unsplash.com/photo-1610348725531-843dff163e2c?auto=format&fit=crop&q=80&w=600",
+    imgUrl: "images/fruits.jpg",
   },
   {
     id: "b3",
@@ -40,9 +37,8 @@ const BANNERS: Banner[] = [
     title: "Snacks, Munchies & Cold Fizzy Drinks",
     subtitle: "Score amazing combo deals on premium potato crisps, double-choc cookies, and chilled cold sodas for your late night streams.",
     highlightText: "Save ₹20 flat on snacks",
-    couponCode: "SMART20",
     colorClass: "from-slate-800 to-indigo-900 border border-slate-750",
-    imgUrl: "https://images.unsplash.com/photo-1543007630-9710e4a00a20?auto=format&fit=crop&q=80&w=600",
+    imgUrl: "images/drinks.jpg",
   }
 ];
 
@@ -104,11 +100,6 @@ export default function Hero() {
                       <p className="text-[10px] text-white/80 font-bold uppercase tracking-wider">EXCLUSIVE OFFER</p>
                       <p className="text-xs sm:text-sm font-black text-white">{activeBanner.highlightText}</p>
                     </div>
-                  </div>
-
-                  <div className="flex items-center space-x-1.5 text-xs font-bold bg-white/15 px-3 py-2 rounded-xl">
-                    <span className="text-white/80">Code:</span>
-                    <span className="font-black text-[#FACC15] tracking-wider select-all">{activeBanner.couponCode}</span>
                   </div>
                 </div>
 

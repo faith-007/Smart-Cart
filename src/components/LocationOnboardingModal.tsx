@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Compass, Loader2, MapPin, Check } from "lucide-react";
 import { Address } from "../types";
 
@@ -7,7 +7,8 @@ interface LocationOnboardingModalProps {
   onClose: () => void;
   userName: string;
   userPhone: string;
-  onAddAddress: (addr: Omit<Address, "id">) => void;
+  onAddAddress: (addr: Address | Omit<Address, "id">, setAsDefault?: boolean) => Promise<any> | void;
+  savedAddresses?: Address[];
 }
 
 export default function LocationOnboardingModal({
@@ -16,20 +17,71 @@ export default function LocationOnboardingModal({
   userName,
   userPhone,
   onAddAddress,
+  savedAddresses,
 }: LocationOnboardingModalProps) {
+  const randomPlaceholderName = React.useMemo(() => {
+    const list = [
+      "Liam", "Sophia", "Aarav", "Zara", "Vikram", "Emily", "Dev", "Ananya", 
+      "Rohan", "Siddharth", "Elena", "Marcus", "Kavya", "Arjun", "Kabir", "Neha"
+    ];
+    return list[Math.floor(Math.random() * list.length)];
+  }, []);
+
   const [step, setStep] = useState<"permission" | "confirm">("permission");
   const [isDetecting, setIsDetecting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
   // Form states
   const [label, setLabel] = useState<"Home" | "Work" | "Other">("Home");
   const [name, setName] = useState(userName || "");
   const [phone, setPhone] = useState(userPhone || "");
-  const [addressLine, setAddressLine] = useState("");
+  const [houseFlatNumber, setHouseFlatNumber] = useState("");
+  const [street, setStreet] = useState("");
   const [city, setCity] = useState("New Delhi");
+  const [stateVal, setStateVal] = useState("Delhi");
   const [pincode, setPincode] = useState("");
+  const [isDefault, setIsDefault] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  // Synchronize/Pre-fill saved address if the user already has one saved
+  useEffect(() => {
+    if (isOpen) {
+      if (savedAddresses && savedAddresses.length > 0) {
+        const def = savedAddresses.find((a) => a.isDefault) || savedAddresses[0];
+        setLabel(def.label || "Home");
+        setName(def.name || def.fullName || userName || "");
+        
+        let rawPhone = def.phone || def.phoneNumber || userPhone || "";
+        // Clean phone formatting for simplicity
+        if (rawPhone.startsWith("+91")) {
+          rawPhone = rawPhone.replace("+91", "").trim();
+        }
+        setPhone(rawPhone);
+        
+        setHouseFlatNumber(def.houseFlatNumber || def.addressLine.split(",")[0]?.trim() || "");
+        setStreet(def.street || def.addressLine.split(",").slice(1).join(",")?.trim() || def.addressLine || "");
+        setCity(def.city || "New Delhi");
+        setStateVal(def.state || "Delhi");
+        setPincode(def.pincode || "");
+        setIsDefault(!!def.isDefault);
+        setEditingId(def.id || null);
+        setStep("confirm"); // Skip geo-onboarding step and load Confirm view automatically
+      } else {
+        setName(userName || "");
+        setPhone(userPhone || "");
+        setLabel("Home");
+        setHouseFlatNumber("");
+        setStreet("");
+        setCity("New Delhi");
+        setStateVal("Delhi");
+        setPincode("");
+        setIsDefault(true);
+        setEditingId(null);
+        setStep("permission");
+      }
+    }
+  }, [isOpen, savedAddresses, userName, userPhone]);
 
   const handleRequestLocation = () => {
     setIsDetecting(true);
@@ -46,7 +98,6 @@ export default function LocationOnboardingModal({
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
 
-        // Auto prep fill defaults
         if (!name) setName(userName || "");
         if (!phone) setPhone(userPhone || "");
 
@@ -55,21 +106,23 @@ export default function LocationOnboardingModal({
           .then((res) => res.json())
           .then((data) => {
             if (data && data.display_name) {
-              setAddressLine(data.display_name);
+              setStreet(data.display_name);
               if (data.address) {
                 const fetchedCity = data.address.city || data.address.town || data.address.suburb || data.address.state_district || "New Delhi";
                 const fetchedPin = data.address.postcode || "";
+                const fetchedState = data.address.state || "Delhi";
                 setCity(fetchedCity);
+                setStateVal(fetchedState);
                 if (fetchedPin) setPincode(fetchedPin);
               }
             } else {
-              setAddressLine(`GPS Zone (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
+              setStreet(`GPS Zone (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
             }
             setStep("confirm");
           })
           .catch((err) => {
             console.error("[GPS Onboarding] Reverse lookup failed:", err);
-            setAddressLine(`Coordinates (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
+            setStreet(`Coordinates (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
             setStep("confirm");
           })
           .finally(() => {
@@ -80,19 +133,18 @@ export default function LocationOnboardingModal({
         console.warn("[GPS Onboarding] Location request errored:", error);
         setErrorMsg("Permission denied or request timed out. Please enter details manually.");
         setIsDetecting(false);
-        // Fallback to empty inputs directly so they can complete it anyway
         setName(userName || "");
         setPhone(userPhone || "");
-        setAddressLine("");
+        setStreet("");
         setStep("confirm");
       },
       { timeout: 7000 }
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !addressLine.trim() || !pincode.trim() || !phone.trim()) {
+    if (!name.trim() || !houseFlatNumber.trim() || !street.trim() || !pincode.trim() || !phone.trim() || !stateVal.trim()) {
       setErrorMsg("Please complete all required fields (*).");
       return;
     }
@@ -101,17 +153,54 @@ export default function LocationOnboardingModal({
       return;
     }
 
-    onAddAddress({
+    const cleanedPhone = "+91 " + phone.replace(/\D/g, "").slice(-10);
+    const combinedAddressLine = `${houseFlatNumber.trim()}, ${street.trim()}`;
+
+    const updatedAddress: any = {
       label,
       name: name.trim(),
-      addressLine: addressLine.trim(),
+      addressLine: combinedAddressLine,
       city: city.trim(),
       pincode: pincode.trim(),
-      phone: "+91 " + phone.replace(/\D/g, "").slice(-10),
-    });
+      phone: cleanedPhone,
+      fullName: name.trim(),
+      phoneNumber: cleanedPhone,
+      houseFlatNumber: houseFlatNumber.trim(),
+      street: street.trim(),
+      landmark: label,
+      state: stateVal.trim(),
+      isDefault: isDefault,
+    };
 
-    onClose();
+    if (editingId) {
+      updatedAddress.id = editingId;
+    }
+
+    setIsSubmitting(true);
+    setErrorMsg("");
+    try {
+      await onAddAddress(updatedAddress, isDefault);
+      onClose();
+    } catch (err: any) {
+      console.error("[LocationOnboarding] Failed to save address:", err);
+      // Extract clean message if it's a JSON string from handleFirestoreError
+      let msg = "Could not save your address. Please verify your internet connection and try again.";
+      if (err instanceof Error) {
+        msg = err.message;
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed && parsed.error) {
+            msg = `Firestore Error: ${parsed.error}`;
+          }
+        } catch (_) {}
+      }
+      setErrorMsg(msg);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
@@ -155,7 +244,8 @@ export default function LocationOnboardingModal({
                 onClick={() => {
                   setName(userName || "");
                   setPhone(userPhone || "");
-                  setAddressLine("");
+                  setHouseFlatNumber("");
+                  setStreet("");
                   setStep("confirm");
                 }}
                 className="w-full py-2.5 text-[10px] font-extrabold uppercase tracking-widest text-gray-400 hover:text-gray-600 transition"
@@ -179,7 +269,7 @@ export default function LocationOnboardingModal({
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="text-[10px] font-bold text-gray-450 uppercase">Address Type Label</label>
+                <label className="text-[10px] font-bold text-gray-450 uppercase">Address Type Label (Landmark)</label>
                 <div className="flex space-x-2 mt-1">
                   {(["Home", "Work", "Other"] as const).map((type) => (
                     <button
@@ -204,8 +294,8 @@ export default function LocationOnboardingModal({
                   <input
                     type="text"
                     required
-                    className="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium focus:border-green-500"
-                    placeholder="e.g. Himanshu"
+                    className="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium focus:border-green-500 focus:outline-hidden"
+                    placeholder={`e.g. ${randomPlaceholderName}`}
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                   />
@@ -217,7 +307,7 @@ export default function LocationOnboardingModal({
                     type="tel"
                     required
                     maxLength={10}
-                    className="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium focus:border-green-500"
+                    className="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium focus:border-green-500 focus:outline-hidden"
                     placeholder="10-digit number"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
@@ -225,37 +315,62 @@ export default function LocationOnboardingModal({
                 </div>
               </div>
 
-              <div>
-                <label className="text-[10px] font-bold text-gray-400 uppercase">Fulfillment Address Line / Landmark *</label>
-                <input
-                  type="text"
-                  required
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium focus:border-green-500"
-                  placeholder="Flat No, Building Name, Society etc."
-                  value={addressLine}
-                  onChange={(e) => setAddressLine(e.target.value)}
-                />
-              </div>
-
               <div className="grid grid-cols-2 gap-3.5">
                 <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase">House/Flat Number *</label>
+                  <input
+                    type="text"
+                    required
+                    className="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium focus:border-green-500 focus:outline-hidden"
+                    placeholder="e.g. Flat 402, 4th Floor"
+                    value={houseFlatNumber}
+                    onChange={(e) => setHouseFlatNumber(e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-gray-400 uppercase">Street Row / Sector *</label>
+                  <input
+                    type="text"
+                    required
+                    className="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium focus:border-green-500 focus:outline-hidden"
+                    placeholder="e.g. Cyber City, Sector 24"
+                    value={street}
+                    onChange={(e) => setStreet(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="col-span-1">
                   <label className="text-[10px] font-bold text-gray-400 uppercase">City *</label>
                   <input
                     type="text"
                     required
-                    className="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium focus:border-green-500"
+                    className="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium focus:border-green-500 focus:outline-hidden"
                     value={city}
                     onChange={(e) => setCity(e.target.value)}
                   />
                 </div>
 
-                <div>
+                <div className="col-span-1">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase">State *</label>
+                  <input
+                    type="text"
+                    required
+                    className="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium focus:border-green-500 focus:outline-hidden"
+                    value={stateVal}
+                    onChange={(e) => setStateVal(e.target.value)}
+                  />
+                </div>
+
+                <div className="col-span-1">
                   <label className="text-[10px] font-bold text-gray-400 uppercase">Pincode *</label>
                   <input
                     type="text"
                     required
                     maxLength={6}
-                    className="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium focus:border-green-500"
+                    className="w-full rounded-xl border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium focus:border-green-500 focus:outline-hidden"
                     placeholder="e.g. 122003"
                     value={pincode}
                     onChange={(e) => setPincode(e.target.value.replace(/\D/g, ""))}
@@ -263,14 +378,37 @@ export default function LocationOnboardingModal({
                 </div>
               </div>
 
+              <div className="flex items-center space-x-2 mt-2 pt-1 border-t border-gray-50">
+                <input
+                  type="checkbox"
+                  id="onboarding-default-checkbox"
+                  checked={isDefault}
+                  onChange={(e) => setIsDefault(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-green-500 focus:ring-green-500 cursor-pointer"
+                />
+                <label htmlFor="onboarding-default-checkbox" className="text-xs font-bold text-gray-600 cursor-pointer select-none">
+                  Set as Default Address
+                </label>
+              </div>
+
               {errorMsg && <p className="text-[10px] font-bold text-red-500 bg-red-50 p-2 rounded-lg">{errorMsg}</p>}
 
               <button
                 type="submit"
-                className="w-full flex items-center justify-center space-x-1 py-3 bg-green-500 hover:bg-green-600 active:scale-98 text-white text-xs font-black uppercase tracking-wider rounded-xl transition shadow-lg shadow-green-100 cursor-pointer"
+                disabled={isSubmitting}
+                className="w-full flex items-center justify-center space-x-1 py-3 bg-green-500 hover:bg-green-600 active:scale-98 text-white text-xs font-black uppercase tracking-wider rounded-xl transition shadow-lg shadow-green-100 cursor-pointer text-center disabled:opacity-50"
               >
-                <Check className="h-4 w-4" />
-                <span>Save Delivery Coordinate</span>
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin text-white" />
+                    <span>Saving Location...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-4 w-4" />
+                    <span>Save Address</span>
+                  </>
+                )}
               </button>
             </form>
           </div>

@@ -42,6 +42,15 @@ export interface Address {
   city: string;
   pincode: string;
   phone: string;
+  isDefault?: boolean;
+  fullName?: string;
+  phoneNumber?: string;
+  houseFlatNumber?: string;
+  street?: string;
+  landmark?: string;
+  state?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Rider {
@@ -84,8 +93,10 @@ export interface Order {
   subtotal: number;
   discount: number;
   deliveryCharge: number;
+  platformFee?: number;
+  handlingCharge?: number;
   total: number;
-  status: "placed" | "confirmed" | "packed" | "out_for_delivery" | "delivered" | "cancelled";
+  status: "placed" | "accepted" | "confirmed" | "packed" | "out_for_delivery" | "delivered" | "cancelled";
   address: Address;
   paymentMethod: string;
   eta: number; // remaining minutes
@@ -97,13 +108,15 @@ export interface Order {
   assigned_at?: string;
   accepted_at?: string;
   delivery_status?: string;
-}
-
-export interface PromoCode {
-  code: string;
-  description: string;
-  discountValue: number; // flat discount or percentage (we'll implement flat rupee savings)
-  minimumOrder: number;
+  riderId?: string;
+  riderName?: string;
+  acceptedAt?: string;
+  placed_at?: string;
+  packed_at?: string;
+  out_for_delivery_at?: string;
+  delivered_at?: string;
+  cancelled_at?: string;
+  cancelledAt?: string;
 }
 
 export interface ComboDeal {
