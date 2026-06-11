@@ -214,16 +214,11 @@ export default function UserProfile({
       if (data.success) {
         setLoginSuccess("OTP sent successfully. A fresh 6-digit verification code has been dispatched to your email.");
       } else {
-        // Handle delivery limitation / fail elegantly
-        if (data.developmentFallback) {
-          setLoginSuccess(`OTP sent successfully in simulation mode! Sandbox Code: ${generatedCode}`);
-        } else {
-          setLoginError(`Email sending failed. Please verify your SMTP config. details: ${data.details || data.error}`);
-        }
+        setLoginError(`Email sending failed. Please verify your SMTP config. Details: ${data.details || data.error}`);
       }
     } catch (err) {
       console.warn("[SmartCart Auth] Resend request failure:", err);
-      setLoginSuccess(`OTP sent successfully in local browser loop! Secure Code: ${generatedCode}`);
+      setLoginError("Email sending failed. Connection error or missing SMTP setup on the server.");
     } finally {
       setAuthLoading(false);
     }
@@ -686,17 +681,11 @@ export default function UserProfile({
           setOtpSent(true);
           setLoginSuccess("OTP sent successfully. A secure 6-digit verification code has been dispatched to your email address.");
         } else {
-          if (data.developmentFallback) {
-            setOtpSent(true);
-            setLoginSuccess(`OTP sent successfully in simulation mode! Sandbox Code: ${generatedCode}`);
-          } else {
-            setLoginError(`Email sending failed. Please check your SMTP configuration: ${data.details || data.error}`);
-          }
+          setLoginError(`Email sending failed. Please check your SMTP configuration: ${data.details || data.error}`);
         }
       } catch (err) {
         console.warn("[SmartCart Auth] Dispatch request failed:", err);
-        setOtpSent(true);
-        setLoginSuccess(`OTP sent successfully in local browser loop! Secure Code: ${generatedCode}`);
+        setLoginError("Email sending failed. Connection error or missing SMTP setup on the server.");
       } finally {
         setAuthLoading(false);
       }
@@ -714,7 +703,7 @@ export default function UserProfile({
       return;
     }
 
-    if (otpInput !== simulatedOtp && otpInput !== "123456") {
+    if (otpInput !== simulatedOtp) {
       const nextAttempts = otpAttempts + 1;
       setOtpAttempts(nextAttempts);
       if (nextAttempts >= 3) {

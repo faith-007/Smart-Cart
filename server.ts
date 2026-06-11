@@ -112,12 +112,10 @@ app.post("/api/send-otp", async (req, res) => {
   } catch (error: any) {
     console.error(`[SmartCart SMTP Failure] Error sending OTP email to ${email}:`, error?.message || error);
     
-    // Provide a detailed error message in json, but also supply the otp in a debug field so testing in preview remains smooth and never blocked.
     return res.json({ 
       success: false, 
-      error: "Email sending failed", // Requirement 5
-      details: error?.message || String(error),
-      developmentFallback: otp // Sandbox escape flag
+      error: "Email sending failed",
+      details: error?.message || String(error)
     });
   }
 });
@@ -236,11 +234,17 @@ app.post("/api/send-order-confirmation", async (req, res) => {
         ${promoSection}
         <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
           <span>Delivery Charge:</span>
-          <strong style="color: #1e293b;">₹${order.deliveryCharge}</strong>
+          <strong style="${order.deliveryCharge === 0 ? "color: #16a34a; font-weight: 800;" : "color: #1e293b;"}">
+            ${order.deliveryCharge === 0 ? "FREE" : `₹${order.deliveryCharge}`}
+          </strong>
         </div>
         <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
           <span>Platform Fee:</span>
-          <strong style="color: #1e293b;">₹2</strong>
+          <strong style="color: #1e293b;">₹${order.platformFee ?? 3}</strong>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+          <span>Handling Charge:</span>
+          <strong style="color: #1e293b;">₹${order.handlingCharge ?? 10}</strong>
         </div>
         <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 12px 0;" />
         <div style="display: flex; justify-content: space-between; font-size: 15px; color: #1e293b; font-weight: 800;">
@@ -304,9 +308,15 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[SmartCart Server] Server is running on http://localhost:${PORT}`);
-  });
+  if (process.env.VERCEL !== "1") {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`[SmartCart Server] Server is running on http://localhost:${PORT}`);
+    });
+  } else {
+    console.log("[SmartCart Server] Vercel environment detected. Serverless routing active.");
+  }
 }
 
 startServer();
+
+export default app;
