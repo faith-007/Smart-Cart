@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { INITIAL_CATEGORIES, INITIAL_PRODUCTS } from "./data";
 import { Product, Category, CartItem, Address, Order, Rider } from "./types";
 import { calculatePricing } from "./lib/pricing";
@@ -20,6 +21,7 @@ import {
   syncOrderToFirebase, 
   fetchOrdersFromFirebase, 
   auth, 
+  db,
   fetchRidersFromFirebase, 
   syncRiderToFirebase, 
   fetchUserProfileFromFirebase,
@@ -31,11 +33,16 @@ import {
   clearAllAddressesFromFirebase
 } from "./lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onSnapshot, collection, query, where } from "firebase/firestore";
 
 // Icons for general UI
-import { Sparkles, Heart, ShoppingBag, ShieldAlert, ArrowLeft, Trash2, Home, AlertCircle, RefreshCw, Star, Info } from "lucide-react";
+import { Sparkles, Heart, ShoppingBag, ShieldAlert, ArrowLeft, Trash2, Home, AlertCircle, RefreshCw, Star, Info, X } from "lucide-react";
 
 export default function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+
   // --- Root States ---
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -54,6 +61,8 @@ export default function App() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState<boolean>(false);
   const [activeOrderForTracking, setActiveOrderForTracking] = useState<Order | null>(null);
+  const [activePolicy, setActivePolicy] = useState<"privacy" | "terms" | "refund" | null>(null);
+  const [newOrderNotifications, setNewOrderNotifications] = useState<Order[]>([]);
 
   // --- Order States ---
   const [orders, setOrders] = useState<Order[]>([]);
@@ -273,51 +282,122 @@ export default function App() {
     };
   }, [isCustomerLoggedIn, userEmail, userPhone, riders, auth.currentUser]);
 
-  // Support URL Hash guards with secure role-based redirecting
+  // 1. Role-based Navigation Guarding
   useEffect(() => {
-    const handleHashChange = () => {
-      const hash = window.location.hash.toLowerCase().replace("#", "");
-      if (hash === "rider") {
-        if (userRole === "Rider") {
-          setActiveTab("rider");
-        } else {
-          // Unauthorized access! Redirect to active role dashboard or home
-          console.warn("[SmartCart RBAC] Prevented access to Rider Portal for non-Rider.");
-          if (userRole === "Admin") {
-            setActiveTab("admin");
-            window.location.hash = "admin";
-          } else {
-            setActiveTab("home");
-            window.location.hash = "";
-          }
-        }
-      } else if (hash === "admin") {
-        if (userRole === "Admin") {
-          setActiveTab("admin");
-        } else {
-          // Unauthorized access! Redirect to active role dashboard or home
-          console.warn("[SmartCart RBAC] Prevented access to Admin Portal for non-Admin.");
-          if (userRole === "Rider") {
-            setActiveTab("rider");
-            window.location.hash = "rider";
-          } else {
-            setActiveTab("home");
-            window.location.hash = "";
-          }
-        }
-      } else if (hash && ["home", "wishlist", "profile"].includes(hash)) {
-        setActiveTab(hash);
+    if (activeTab === "rider" && userRole !== "Rider") {
+      console.warn("[SmartCart RBAC] Prevented access to Rider Portal for non-Rider.");
+      if (userRole === "Admin") {
+        setActiveTab("admin");
+      } else {
+        setActiveTab("home");
       }
-    };
+    } else if (activeTab === "admin" && userRole !== "Admin") {
+      console.warn("[SmartCart RBAC] Prevented access to Admin Portal for non-Admin.");
+      if (userRole === "Rider") {
+        setActiveTab("rider");
+      } else {
+        setActiveTab("home");
+      }
+    }
+  }, [activeTab, userRole]);
 
-    window.addEventListener("hashchange", handleHashChange);
-    const timeoutId = setTimeout(handleHashChange, 500);
+  // 2. State-to-URL Synchronization Effect (State changes push new routes)
+  useEffect(() => {
+    const path = location.pathname;
+    let targetPath = "/";
 
-    return () => {
-      window.removeEventListener("hashchange", handleHashChange);
-      clearTimeout(timeoutId);
-    };
-  }, [userRole]);
+    if (activeTab && activeTab !== "home") {
+      targetPath = `/${activeTab}`;
+    }
+
+    if (isCartOpen) {
+      targetPath = "/cart";
+    } else if (isCheckoutOpen) {
+      targetPath = "/checkout";
+    } else if (selectedProduct) {
+      targetPath = `/product/${selectedProduct.id}`;
+    } else if (activeOrderForTracking) {
+      targetPath = `/tracking/${activeOrderForTracking.id}`;
+    }
+
+    if (targetPath !== path && !path.startsWith("/api/")) {
+      navigate(targetPath);
+    }
+
+    // Synchronize query parameters for Categories & Search Queries
+    const currentCategory = searchParams.get("category");
+    const currentSearch = searchParams.get("search") || "";
+    const categoryDifference = (selectedCategory || "") !== (currentCategory || "");
+    const searchDifference = searchQuery !== currentSearch;
+
+    if (categoryDifference || searchDifference) {
+      const nextParams = new URLSearchParams(searchParams);
+      if (selectedCategory) {
+        nextParams.set("category", selectedCategory);
+      } else {
+        nextParams.delete("category");
+      }
+      if (searchQuery) {
+        nextParams.set("search", searchQuery);
+      } else {
+        nextParams.delete("search");
+      }
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [activeTab, isCartOpen, isCheckoutOpen, selectedProduct?.id, activeOrderForTracking?.id, selectedCategory, searchQuery]);
+
+  // 3. URL-to-State Synchronization Effect (Back button pops state correctly)
+  useEffect(() => {
+    const path = location.pathname;
+
+    // View tab sync
+    if (path === "/wishlist") {
+      setActiveTab("wishlist");
+    } else if (path === "/profile") {
+      setActiveTab("profile");
+    } else if (path === "/admin") {
+      setActiveTab("admin");
+    } else if (path === "/rider") {
+      setActiveTab("rider");
+    } else if (path === "/" || path === "/home") {
+      setActiveTab("home");
+    }
+
+    // Modal & Drawer drawers synchronization
+    setIsCartOpen(path === "/cart");
+    setIsCheckoutOpen(path === "/checkout");
+
+    // Product Details sync
+    const productMatch = path.match(/^\/product\/([^/]+)/);
+    if (productMatch) {
+      const pId = productMatch[1];
+      const match = products.find((prod) => prod.id === pId);
+      if (match) {
+        setSelectedProduct(match);
+      }
+    } else {
+      setSelectedProduct(null);
+    }
+
+    // Tracking Panel sync
+    const trackingMatch = path.match(/^\/tracking\/([^/]+)/);
+    if (trackingMatch) {
+      const oId = trackingMatch[1];
+      const match = orders.find((ord) => ord.id === oId);
+      if (match) {
+        setActiveOrderForTracking(match);
+      }
+    } else {
+      setActiveOrderForTracking(null);
+    }
+
+    // Category and query synchronization
+    const categoryQuery = searchParams.get("category");
+    const searchTermQuery = searchParams.get("search") || "";
+    setSelectedCategory(categoryQuery);
+    setSearchQuery(searchTermQuery);
+
+  }, [location.pathname, searchParams, products, orders.length]);
 
   // Load cart, wishlist, addresses, and orders on boot (with real-time Supabase sync)
   useEffect(() => {
@@ -739,6 +819,105 @@ export default function App() {
     };
   }, [activeTab, userRole, isCustomerLoggedIn]);
 
+  // Play custom synthesized melodic double chime for unassigned order alert
+  const playNotificationSound = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      const osc1 = audioCtx.createOscillator();
+      const gain1 = audioCtx.createGain();
+      osc1.connect(gain1);
+      gain1.connect(audioCtx.destination);
+      
+      osc1.type = "sine";
+      osc1.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+      gain1.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      
+      osc1.start();
+      osc1.stop(audioCtx.currentTime + 0.3);
+
+      setTimeout(() => {
+        try {
+          const osc2 = audioCtx.createOscillator();
+          const gain2 = audioCtx.createGain();
+          osc2.connect(gain2);
+          gain2.connect(audioCtx.destination);
+          
+          osc2.type = "sine";
+          osc2.frequency.setValueAtTime(659.25, audioCtx.currentTime); // E5
+          gain2.gain.setValueAtTime(0.25, audioCtx.currentTime);
+          gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+          
+          osc2.start();
+          osc2.stop(audioCtx.currentTime + 0.4);
+        } catch (e) {}
+      }, 150);
+    } catch (error) {
+      console.warn("Browser AudioContext not initiated or blocked:", error);
+    }
+  };
+
+  // Real-time Firestore unassigned orders listener for Riders
+  useEffect(() => {
+    const isRiderRole = userRole === "Rider" || activeTab === "rider";
+    const user = auth.currentUser;
+    if (!isRiderRole || !user) {
+      setNewOrderNotifications([]);
+      return;
+    }
+
+    console.log("[SmartCart Listener] Initializing real-time Firestore tracking for rider notifications...");
+    const ordersRef = collection(db, "orders");
+    const q = query(ordersRef, where("status", "==", "placed"));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const activeUnassignedOrders: Order[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as Order;
+        const hasRider = data.riderId || data.rider_id;
+        if (!hasRider) {
+          activeUnassignedOrders.push({ ...data, id: docSnap.id });
+        }
+      });
+
+      // Update local orders list so that they populate in Rider Dashboard in real time
+      setOrders((prev) => {
+        const orderMap = new Map<string, Order>();
+        prev.forEach((o) => orderMap.set(o.id, o));
+        
+        // Exclude unassigned orders that got accepted/claimed by someone else (i.e. status changed, or rider claim occurred)
+        // But keep unassigned orders which are still placed
+        activeUnassignedOrders.forEach((o) => orderMap.set(o.id, o));
+        return Array.from(orderMap.values());
+      });
+
+      // Alert Rider with notification and audio if new orders arrive
+      setNewOrderNotifications((prevNotifs) => {
+        const currentUnassignedIds = new Set(activeUnassignedOrders.map(o => o.id));
+        // Remove any old notification if that order is no longer in placing state (accepted by someone else)
+        const filteredPrev = prevNotifs.filter(n => currentUnassignedIds.has(n.id));
+
+        const newlyArrived: Order[] = [];
+        activeUnassignedOrders.forEach((o) => {
+          const wasNotified = prevNotifs.some(n => n.id === o.id);
+          if (!wasNotified) {
+            newlyArrived.push(o);
+            playNotificationSound();
+          }
+        });
+
+        return [...filteredPrev, ...newlyArrived];
+      });
+    }, (err) => {
+      console.warn("Firestore subscription error:", err);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [userRole, activeTab, auth.currentUser]);
+
   // Save states to localStorage on transitions
   const saveCart = (updatedCart: CartItem[]) => {
     setCart(updatedCart);
@@ -1159,6 +1338,7 @@ export default function App() {
       paymentMethod: payMethod,
       eta: 15,
       deliveryPartner: undefined,
+      placed_at: new Date().toISOString(),
     };
 
     // Deduct stock levels in state
@@ -1923,16 +2103,65 @@ export default function App() {
 
         {/* 5. RIDER DASHBOARD TAB */}
         {activeTab === "rider" && (
-          <RiderDashboard
-            riders={riders}
-            setRiders={setRiders}
-            orders={orders}
-            onUpdateOrderStatus={handleUpdateOrderStatus}
-            onAssignPartnerToOrder={handleAssignPartnerToOrder}
-            onPassOrder={handlePassOrder}
-            riderSession={riderSession}
-            setRiderSession={setRiderSession}
-          />
+          <>
+            {/* Real-time Rider Order Notifications container */}
+            {newOrderNotifications.length > 0 && (
+              <div className="fixed top-4 right-4 z-[90] space-y-3 max-w-sm w-full animate-in slide-in-from-right-5 font-sans">
+                {newOrderNotifications.map((notif) => (
+                  <div 
+                    key={notif.id}
+                    className="bg-gray-950 text-white border border-green-500 rounded-2xl p-4 shadow-2xl flex flex-col gap-2 relative overflow-hidden"
+                  >
+                    {/* Accent glow bar */}
+                    <div className="absolute top-0 left-0 right-0 h-1 bg-green-500 animate-pulse" />
+
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="bg-green-500/10 text-green-405 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded border border-green-500/20">
+                          🔔 Instant Order Alert
+                        </span>
+                        <h4 className="text-xs font-black text-white mt-1.5 leading-none">
+                          New Order #{notif.id.substring(0, 8)}
+                        </h4>
+                        <p className="text-[10px] text-gray-400 mt-1 leading-normal">
+                          Delivery to <span className="text-gray-200 capitalize font-bold">{notif.address.name}</span> ({notif.address.city})
+                        </p>
+                      </div>
+                      <button 
+                        onClick={() => setNewOrderNotifications(prev => prev.filter(n => n.id !== notif.id))}
+                        className="text-gray-400 hover:text-white transition font-bold text-xs p-1"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between mt-1 text-[11px] border-t border-gray-800 pt-2 text-gray-450">
+                      <span>Total: ₹{notif.total}</span>
+                      <button
+                        onClick={() => {
+                          setNewOrderNotifications(prev => prev.filter(n => n.id !== notif.id));
+                        }}
+                        className="bg-green-500 text-gray-950 font-black px-2.5 py-1 rounded text-[9px] hover:bg-green-400 transition cursor-pointer"
+                      >
+                        View on Dashboard
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <RiderDashboard
+              riders={riders}
+              setRiders={setRiders}
+              orders={orders}
+              onUpdateOrderStatus={handleUpdateOrderStatus}
+              onAssignPartnerToOrder={handleAssignPartnerToOrder}
+              onPassOrder={handlePassOrder}
+              riderSession={riderSession}
+              setRiderSession={setRiderSession}
+            />
+          </>
         )}
 
       </div>
@@ -1951,6 +2180,7 @@ export default function App() {
         onToggleWishlist={handleToggleWishlist}
         allProducts={products}
         onProductClick={(p) => setSelectedProduct(p)}
+        orders={orders}
       />
 
       {/* B. CART DRAWER list sheet */}
@@ -2028,13 +2258,15 @@ export default function App() {
                 )}
               </div>
               <div className="max-w-xs">
-                <h4 className="font-bold text-gray-300 uppercase text-[10px] tracking-widest mb-2.5">Support & Policy</h4>
+                <h4 className="font-bold text-gray-300 uppercase text-[10px] tracking-widest mb-2.5">Support & Policies</h4>
                 <p className="text-gray-400 font-sans">
                   Contact: <a href="mailto:smartcart.busi@gmail.com" className="text-orange-500 hover:underline font-semibold">smartcart.busi@gmail.com</a>
                 </p>
-                <p className="text-gray-400 mt-2 text-[11px] leading-relaxed">
-                  <strong className="text-orange-400">No Return Policy:</strong> Due to the nature of 15-minute express delivery and perishable/fresh groceries, we enforce a strict no-return policy once orders are dispatched.
-                </p>
+                <div className="mt-2.5 space-y-1.5 flex flex-col">
+                  <button onClick={() => setActivePolicy("privacy")} className="text-left text-gray-400 hover:text-orange-400 transition hover:underline text-[11px] cursor-pointer">Privacy Policy</button>
+                  <button onClick={() => setActivePolicy("terms")} className="text-left text-gray-400 hover:text-orange-400 transition hover:underline text-[11px] cursor-pointer">Terms & Conditions</button>
+                  <button onClick={() => setActivePolicy("refund")} className="text-left text-gray-400 hover:text-orange-400 transition hover:underline text-[11px] cursor-pointer">Refund & Cancellation Policy</button>
+                </div>
               </div>
             </div>
 
@@ -2049,6 +2281,118 @@ export default function App() {
 
         </div>
       </footer>
+
+      {/* LEGAL POLICY MODAL VIEWER */}
+      {activePolicy && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in text-left">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-gray-100 flex flex-col max-h-[85vh] relative animate-in zoom-in-95 duration-200">
+            {/* Close Button */}
+            <button
+              onClick={() => setActivePolicy(null)}
+              className="absolute top-4 right-4 z-10 flex h-9 w-9 items-center justify-center rounded-xl bg-gray-50 text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition cursor-pointer"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            {/* Modal Header */}
+            <div className="pb-4 border-b border-gray-100 mb-4 text-left">
+              <span className="inline-flex items-center space-x-1 rounded-full bg-orange-500/10 px-2.5 py-1 text-[10px] font-black text-orange-700 uppercase tracking-wider mb-2">
+                SmartCart Official Legal Center
+              </span>
+              <h2 className="text-xl font-black text-gray-950">
+                {activePolicy === "privacy" && "Privacy & Coordinate Security Policy"}
+                {activePolicy === "terms" && "Terms & Conditions of Fulfillment"}
+                {activePolicy === "refund" && "Refund & Delivery Cancellation Guidelines"}
+              </h2>
+              <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">
+                Effective Date: June 12, 2026 • Version 2.2
+              </p>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto pr-1 space-y-4 text-xs text-gray-650 leading-relaxed font-medium">
+              {activePolicy === "privacy" && (
+                <>
+                  <section>
+                    <h3 className="font-black text-gray-950 text-xs uppercase mb-1">1. Information We Collect</h3>
+                    <p>
+                      To deliver high-quality groceries in under 15 minutes, SmartCart collects precise GPS layout coordinates (latitude and longitude), user account profiles, shipping addresses, telephone contact numbers, and purchase transaction records.
+                    </p>
+                  </section>
+                  <section>
+                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">2. How We Use Coordinate Data</h3>
+                    <p>
+                      Your real-time GPS coordinates are critical for route optimization. They allow assigned couriers to plot fast transit maps from nearest fulfillment hubs to your doorstep. Address metadata and phone numbers are securely exposed to the assigned delivery courier only for active, unfulfilled orders.
+                    </p>
+                  </section>
+                  <section>
+                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">3. Privacy Protection & PCI-DSS Safety</h3>
+                    <p>
+                      We never trade, loan, or lease your geographical location or PII records to affiliate brokers. All customer financial details are stored under rigid security standard rules using certified PCI-DSS compliant secure vaults.
+                    </p>
+                  </section>
+                </>
+              )}
+
+              {activePolicy === "terms" && (
+                <>
+                  <section>
+                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">1. 15-Minute Delivery Promise</h3>
+                    <p>
+                      SmartCart strives to dispatch and fulfill cargo bags within approximately 15 minutes from order creation. However, the exact arrival is dependent on regional factors, atmospheric storm patterns, global shipping lockdowns, and density of active on-duty couriers.
+                    </p>
+                  </section>
+                  <section>
+                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">2. User Account Obligations</h3>
+                    <p>
+                      By accessing this service, you warrant that you are at least 18 years of age or accessing under direct guidance of legal guardians. You must supply precise, authentic phone dialer numbers and deliver coordinates to prevent order loss or delivery failures.
+                    </p>
+                  </section>
+                  <section>
+                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">3. Prohibited Transactions</h3>
+                    <p>
+                      Users are forbidden from spoofing geolocation coordinates, creating multiple profiles to exploit dynamic discount promo campaigns, or harassing couriers. SmartCart reserves the right to suspend or block profiles violating operational boundaries.
+                    </p>
+                  </section>
+                </>
+              )}
+
+              {activePolicy === "refund" && (
+                <>
+                  <section>
+                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">1. Cancellation Window</h3>
+                    <p>
+                      Orders can be cancelled only before they are packed. Once an order is packed, dispatched, or out for delivery, cancellation is not allowed.
+                    </p>
+                  </section>
+                  <section>
+                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">2. No Returns or Exchanges</h3>
+                    <p>
+                      No returns, exchanges, or refunds are provided after successful delivery. All sales are final after delivery.
+                    </p>
+                  </section>
+                  <section>
+                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">3. Non-Refundable Charges</h3>
+                    <p>
+                      Delivery charges, handling charges, and platform fees are non-refundable.
+                    </p>
+                  </section>
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-4 border-t border-gray-100 mt-4 flex justify-end">
+              <button
+                onClick={() => setActivePolicy(null)}
+                className="px-5 py-2.5 bg-gray-900 hover:bg-gray-800 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition cursor-pointer font-sans"
+              >
+                Acknowledge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

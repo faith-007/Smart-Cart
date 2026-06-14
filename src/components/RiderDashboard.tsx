@@ -93,6 +93,71 @@ export default function RiderDashboard({
   const [notification, setNotification] = useState<string | null>(null);
   const [isAcceptingOrder, setIsAcceptingOrder] = useState<string | null>(null);
 
+  // Raw GPS coordinates tracking for precise turn-by-turn distance & navigation
+  const [riderGpsLat, setRiderGpsLat] = useState<number | null>(null);
+  const [riderGpsLng, setRiderGpsLng] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setRiderGpsLat(pos.coords.latitude);
+          setRiderGpsLng(pos.coords.longitude);
+        },
+        (err) => console.warn("[Rider Initial GPS] skipped:", err)
+      );
+    }
+  }, []);
+
+  const calculateGpsDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371; // Radius of the earth in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const d = R * c; // Distance in km
+    return d;
+  };
+
+  const getEstimatedDistance = (o: Order) => {
+    const targetLat = o.lat ?? o.address?.lat;
+    const targetLng = o.lng ?? o.address?.lng;
+    
+    if (typeof targetLat === "number" && typeof targetLng === "number") {
+      if (typeof riderGpsLat === "number" && typeof riderGpsLng === "number") {
+        const gpsDistInKm = calculateGpsDistance(riderGpsLat, riderGpsLng, targetLat, targetLng);
+        return `${gpsDistInKm.toFixed(2)} km`;
+      } else {
+        const fallbackDist = getDistanceToOrder(o);
+        return `${fallbackDist} km (est.)`;
+      }
+    }
+    
+    const fallbackDist = getDistanceToOrder(o);
+    return `${fallbackDist} km (est.)`;
+  };
+
+  const getEstimatedEta = (o: Order) => {
+    const targetLat = o.lat ?? o.address?.lat;
+    const targetLng = o.lng ?? o.address?.lng;
+    
+    let distKm = 0;
+    if (typeof targetLat === "number" && typeof targetLng === "number") {
+      if (typeof riderGpsLat === "number" && typeof riderGpsLng === "number") {
+        distKm = calculateGpsDistance(riderGpsLat, riderGpsLng, targetLat, targetLng);
+      } else {
+        distKm = getDistanceToOrder(o);
+      }
+    } else {
+      distKm = getDistanceToOrder(o);
+    }
+    const mins = Math.max(3, Math.round(2.4 * distKm + 3));
+    return `${mins} mins`;
+  };
+
   const getDistanceToOrder = (o: Order) => {
     if (!riderSession) return 0;
     const coords = getOrderGridCoordinates(o.address.addressLine, o.id);
@@ -269,6 +334,9 @@ export default function RiderDashboard({
   };
 
   const updateRiderCoordinates = (riderId: string, latitude: number, longitude: number) => {
+    setRiderGpsLat(latitude);
+    setRiderGpsLng(longitude);
+    
     // Convert GPS latitude & longitude coordinates to simulated percentage grid bounds of Delhi area for visuals (e.g. 28N, 77E)
     // Map bounds approximately Delhi area: Lat 28.4 to 28.8, Lng 76.9 to 77.3
     const relativeLat = Math.max(10, Math.min(90, ((latitude - 28.4) / 0.4) * 100));
@@ -859,9 +927,64 @@ export default function RiderDashboard({
                               <p className="text-gray-500 text-[11px] mt-0.5 leading-normal">{order.address.addressLine}, {order.address.city} - {order.address.pincode}</p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2.5 border-t border-gray-200/60 pt-2.5 mt-2.5">
-                            <Phone className="h-4 w-4 text-gray-400 shrink-0" />
-                            <a href={`tel:${order.address.phone}`} className="font-bold text-gray-700 hover:underline">{order.address.phone}</a>
+                          {order.address.phone ? (
+                            <div className="flex items-center gap-2 border-t border-gray-200/60 pt-2.5 mt-2.5">
+                              <a
+                                href={`tel:${order.address.phone}`}
+                                className="w-full flex items-center justify-center gap-2 py-2 bg-green-500 hover:bg-green-600 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl shadow-xs transition active:scale-95 cursor-pointer font-sans"
+                              >
+                                <Phone className="h-3.5 w-3.5 text-white" />
+                                <span>Call Customer ({order.address.phone})</span>
+                              </a>
+                            </div>
+                          ) : null}
+
+                          {/* Coordinates and Navigation details */}
+                          <div className="border-t border-gray-200/60 pt-2.5 mt-2.5 space-y-1.5 text-[11px]">
+                            <div className="flex justify-between items-center">
+                              <span className="font-bold text-gray-500 uppercase text-[10px]">Customer Latitude:</span>
+                              <span className="font-mono text-gray-800 font-bold bg-white px-1.5 py-0.5 rounded border border-gray-150">
+                                {typeof order.lat === "number" ? order.lat.toFixed(6) : (typeof order.address?.lat === "number" ? order.address.lat.toFixed(6) : "Unavailable")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="font-bold text-gray-500 uppercase text-[10px]">Customer Longitude:</span>
+                              <span className="font-mono text-gray-800 font-bold bg-white px-1.5 py-0.5 rounded border border-gray-150">
+                                {typeof order.lng === "number" ? order.lng.toFixed(6) : (typeof order.address?.lng === "number" ? order.address.lng.toFixed(6) : "Unavailable")}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="font-bold text-gray-500 uppercase text-[10px]">Estimated Distance:</span>
+                              <span className="font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                                {getEstimatedDistance(order)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="font-bold text-gray-500 uppercase text-[10px]">Estimated ETA:</span>
+                              <span className="font-bold text-green-600 bg-green-50 px-1.5 py-0.5 rounded border border-green-100">
+                                {getEstimatedEta(order)}
+                              </span>
+                            </div>
+
+                            {((typeof order.lat === "number" && typeof order.lng === "number") || (typeof order.address?.lat === "number" && typeof order.address?.lng === "number")) ? (
+                              <button
+                                type="button"
+                                id={`open-nav-${order.id}`}
+                                onClick={() => {
+                                  const destLat = order.lat ?? order.address?.lat;
+                                  const destLng = order.lng ?? order.address?.lng;
+                                  window.open(`https://www.google.com/maps/dir/?api=1&destination=${destLat},${destLng}`, "_blank");
+                                }}
+                                className="mt-2 w-full flex items-center justify-center space-x-1.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black uppercase tracking-wider rounded-xl transition cursor-pointer shadow-md shadow-blue-100"
+                              >
+                                <Compass className="h-3.5 w-3.5 text-white animate-spin" style={{ animationDuration: '8s' }} />
+                                <span>Open Navigation</span>
+                              </button>
+                            ) : (
+                              <div className="mt-2 p-2 bg-yellow-50 text-yellow-850 border border-yellow-200 rounded-xl text-[9px] font-bold uppercase leading-relaxed text-center">
+                                ⚠️ GPS Coordinates unavailable for exact navigation. Using offline backup dispatch.
+                              </div>
+                            )}
                           </div>
                           
                           {/* Instructions */}
@@ -1035,9 +1158,14 @@ export default function RiderDashboard({
 
                         <div className="space-y-1.5 text-[11px] text-gray-500 mb-3.5 font-medium">
                           {riderSession && (
-                            <div className="flex items-center gap-1 text-[10px] font-black text-orange-600 bg-orange-50/70 py-1 px-2.5 rounded-lg border border-orange-100 w-fit mb-1 bg-clip-border">
-                              <MapPin className="h-3 w-3 text-orange-500" />
-                              <span>{dist === 0 ? "Directly at Hub" : `${dist} km away`} • Approx {etaMins} mins dispatch</span>
+                            <div className="flex flex-col gap-1 text-[10px] font-black text-orange-600 bg-orange-50/70 py-1 px-2.5 rounded-lg border border-orange-100 w-fit mb-1 bg-clip-border">
+                              <div className="flex items-center gap-1">
+                                <MapPin className="h-3 w-3 text-orange-500" />
+                                <span>{getEstimatedDistance(order)} away ({getEstimatedEta(order)} ETA)</span>
+                              </div>
+                              <div className="text-[9px] text-gray-500 font-mono font-medium">
+                                Lat: {typeof order.lat === "number" ? order.lat.toFixed(6) : (typeof order.address?.lat === "number" ? order.address.lat.toFixed(6) : "Unavailable")} | Lng: {typeof order.lng === "number" ? order.lng.toFixed(6) : (typeof order.address?.lng === "number" ? order.address.lng.toFixed(6) : "Unavailable")}
+                              </div>
                             </div>
                           )}
                           <p className="line-clamp-1"><strong className="text-gray-700">Hub Target:</strong> SmartCart ND01 Hub</p>

@@ -269,17 +269,18 @@ export default function OrderTracking({
             </div>
 
             {/* Direct phone simulate trigger */}
-            <a
-              href={`tel:${order.deliveryPartner.phone}`}
-              onClick={(e) => {
-                e.preventDefault();
-                setSuccessMessage(`Calling delivery agent ${order.deliveryPartner?.name} at simulated phone line ${order.deliveryPartner?.phone}`);
-              }}
-              className="flex items-center space-x-2 shrink-0 rounded-xl bg-orange-500 hover:bg-orange-600 px-4 py-2 text-white font-bold text-xs shadow-xs transition cursor-pointer"
-            >
-              <Phone className="h-4 w-4" />
-              <span>Call Rider Partner</span>
-            </a>
+            {order.deliveryPartner.phone ? (
+              <a
+                href={`tel:${order.deliveryPartner.phone}`}
+                onClick={() => {
+                  setSuccessMessage(`Opening dialer to call partner ${order.deliveryPartner?.name} (${order.deliveryPartner?.phone})`);
+                }}
+                className="flex items-center space-x-2 shrink-0 rounded-xl bg-orange-500 hover:bg-orange-600 px-4 py-2 text-white font-bold text-xs shadow-xs transition cursor-pointer"
+              >
+                <Phone className="h-4 w-4" />
+                <span>Call Rider Partner</span>
+              </a>
+            ) : null}
           </div>
         ) : (
           <div className="bg-orange-50/70 border border-orange-100 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-3 text-left">

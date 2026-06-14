@@ -51,6 +51,9 @@ export interface Address {
   state?: string;
   createdAt?: string;
   updatedAt?: string;
+  lat?: number;
+  lng?: number;
+  gpsAccuracy?: number;
 }
 
 export interface Rider {
@@ -117,6 +120,9 @@ export interface Order {
   delivered_at?: string;
   cancelled_at?: string;
   cancelledAt?: string;
+  lat?: number;
+  lng?: number;
+  gpsAccuracy?: number;
 }
 
 export interface ComboDeal {
@@ -128,3 +134,15 @@ export interface ComboDeal {
   image: string;
   badge: string;
 }
+
+export interface Review {
+  id: string;
+  productId: string;
+  userId: string;
+  userName: string;
+  rating: number;
+  comment: string;
+  createdAt: string;
+  orderId?: string;
+}
+

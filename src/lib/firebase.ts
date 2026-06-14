@@ -23,7 +23,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup
 } from "firebase/auth";
-import { Order, Rider, Address } from "../types.ts";
+import { Order, Rider, Address, Review } from "../types.ts";
 import firebaseConfig from "../../firebase-applet-config.json";
 
 // Initialize Firebase with custom or platform configuration
@@ -324,6 +324,9 @@ export async function syncOrderToFirebase(order: Order): Promise<{ success: bool
       address: order.address,
       paymentMethod: order.paymentMethod,
       eta: Number(order.eta),
+      lat: typeof order.lat === "number" ? order.lat : (typeof order.address?.lat === "number" ? order.address.lat : null),
+      lng: typeof order.lng === "number" ? order.lng : (typeof order.address?.lng === "number" ? order.address.lng : null),
+      gpsAccuracy: typeof order.gpsAccuracy === "number" ? order.gpsAccuracy : (typeof order.address?.gpsAccuracy === "number" ? order.address.gpsAccuracy : null),
       rider_id: order.rider_id || null,
       rider_name: order.rider_name || null,
       riderId: order.riderId || order.rider_id || null,
@@ -518,6 +521,9 @@ function mapDocToOrder(docSnapshot: any): Order {
     address: data.address,
     paymentMethod: data.paymentMethod,
     eta: Number(data.eta),
+    lat: typeof data.lat === "number" ? data.lat : (typeof data.address?.lat === "number" ? data.address.lat : undefined),
+    lng: typeof data.lng === "number" ? data.lng : (typeof data.address?.lng === "number" ? data.address.lng : undefined),
+    gpsAccuracy: typeof data.gpsAccuracy === "number" ? data.gpsAccuracy : (typeof data.address?.gpsAccuracy === "number" ? data.address.gpsAccuracy : undefined),
     deliveryPartner: partner || undefined,
     rider_id: data.rider_id || partner?.id || undefined,
     rider_name: data.rider_name || partner?.name || undefined,
@@ -564,6 +570,9 @@ export async function fetchSavedAddressesFromFirebase(userId: string): Promise<A
         state: data.state || "",
         createdAt: data.createdAt || "",
         updatedAt: data.updatedAt || "",
+        lat: typeof data.lat === "number" ? data.lat : undefined,
+        lng: typeof data.lng === "number" ? data.lng : undefined,
+        gpsAccuracy: typeof data.gpsAccuracy === "number" ? data.gpsAccuracy : undefined,
       });
     });
     // Sort so that isDefault is first, then by createdAt asc
@@ -615,6 +624,9 @@ export async function saveAddressToFirebase(
       isDefault: isDefault,
       createdAt: ("createdAt" in address ? (address as any).createdAt : "") || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      lat: typeof address.lat === "number" ? address.lat : null,
+      lng: typeof address.lng === "number" ? address.lng : null,
+      gpsAccuracy: typeof address.gpsAccuracy === "number" ? address.gpsAccuracy : null,
     };
 
     if (isDefault) {
@@ -657,6 +669,9 @@ export async function saveAddressToFirebase(
       state: payload.state,
       createdAt: payload.createdAt,
       updatedAt: payload.updatedAt,
+      lat: typeof payload.lat === "number" ? payload.lat : undefined,
+      lng: typeof payload.lng === "number" ? payload.lng : undefined,
+      gpsAccuracy: typeof payload.gpsAccuracy === "number" ? payload.gpsAccuracy : undefined,
     };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, pathForWrite);
@@ -723,3 +738,57 @@ export async function clearAllAddressesFromFirebase(userId: string): Promise<voi
     handleFirestoreError(error, OperationType.DELETE, pathForDelete);
   }
 }
+
+/**
+ * Fetch all product reviews from Firebase
+ */
+export async function fetchReviewsFromFirebase(productId: string): Promise<Review[]> {
+  const pathForQuery = "reviews";
+  try {
+    const reviewsRef = collection(db, "reviews");
+    const q = query(reviewsRef, where("productId", "==", productId));
+    const querySnapshot = await getDocs(q);
+    const reviews: Review[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      reviews.push({
+        id: docSnap.id,
+        productId: data.productId || "",
+        userId: data.userId || "",
+        userName: data.userName || "Customer",
+        rating: typeof data.rating === "number" ? data.rating : 5,
+        comment: data.comment || "",
+        createdAt: data.createdAt || new Date().toISOString(),
+        orderId: data.orderId || "",
+      });
+    });
+    // Sort client-side to bypass composite index requirement
+    reviews.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return reviews;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, pathForQuery);
+    return [];
+  }
+}
+
+/**
+ * Save a new review to Firebase
+ */
+export async function saveReviewToFirebase(review: Review): Promise<void> {
+  const pathForWrite = `reviews/${review.id}`;
+  try {
+    await setDoc(doc(db, "reviews", review.id), {
+      id: review.id,
+      productId: review.productId,
+      userId: review.userId,
+      userName: review.userName,
+      rating: review.rating,
+      comment: review.comment,
+      createdAt: review.createdAt,
+      orderId: review.orderId || "",
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, pathForWrite);
+  }
+}
+

@@ -190,6 +190,43 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["fullName", "phoneNumber", "houseFlatNumber", "street", "city", "pincode", "isDefault"]
+    },
+    "Review": {
+      "title": "Product Review",
+      "description": "A customer review and rating for a specific product",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique review identifier (e.g., combined userId_productId)"
+        },
+        "productId": {
+          "type": "string",
+          "description": "Unique product identifier"
+        },
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who reviewed this product"
+        },
+        "userName": {
+          "type": "string",
+          "description": "The name of the user who reviewed this product"
+        },
+        "rating": {
+          "type": "number",
+          "description": "Rating score ranging from 1 to 5"
+        },
+        "comment": {
+          "type": "string",
+          "description": "Text opinion or critique of the product"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Date-time when review was captured"
+        }
+      },
+      "required": ["id", "productId", "userId", "userName", "rating", "comment", "createdAt"]
     }
   },
   "firestore": {
@@ -208,6 +245,10 @@
     "/users/{userId}/addresses/{addressId}": {
       "schema": "UserAddress",
       "description": "Subcollection under user's private document containing their saved addresses"
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Collection storing customer reviews and ratings for products"
     }
   }
 }

@@ -1,1 +1,15 @@
+@import "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
 @import "tailwindcss";
+
+/* Fix Leaflet map coordinate controls and container overlaps */
+.leaflet-container {
+  font-family: inherit;
+  border-radius: 1rem;
+}
+.leaflet-pane {
+  z-index: 10 !important;
+}
+.leaflet-top, .leaflet-bottom {
+  z-index: 20 !important;
+}
+

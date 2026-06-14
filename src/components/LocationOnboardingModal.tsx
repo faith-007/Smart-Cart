@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Compass, Loader2, MapPin, Check } from "lucide-react";
 import { Address } from "../types";
+import DeliveryMap from "./DeliveryMap";
 
 interface LocationOnboardingModalProps {
   isOpen: boolean;
@@ -43,6 +44,9 @@ export default function LocationOnboardingModal({
   const [pincode, setPincode] = useState("");
   const [isDefault, setIsDefault] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [lat, setLat] = useState<number | null>(null);
+  const [lng, setLng] = useState<number | null>(null);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
 
   // Synchronize/Pre-fill saved address if the user already has one saved
   useEffect(() => {
@@ -66,6 +70,9 @@ export default function LocationOnboardingModal({
         setPincode(def.pincode || "");
         setIsDefault(!!def.isDefault);
         setEditingId(def.id || null);
+        setLat(def.lat || null);
+        setLng(def.lng || null);
+        setGpsAccuracy(def.gpsAccuracy || null);
         setStep("confirm"); // Skip geo-onboarding step and load Confirm view automatically
       } else {
         setName(userName || "");
@@ -78,6 +85,9 @@ export default function LocationOnboardingModal({
         setPincode("");
         setIsDefault(true);
         setEditingId(null);
+        setLat(null);
+        setLng(null);
+        setGpsAccuracy(null);
         setStep("permission");
       }
     }
@@ -95,14 +105,18 @@ export default function LocationOnboardingModal({
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
+        const rawLat = position.coords.latitude;
+        const rawLng = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+        setLat(rawLat);
+        setLng(rawLng);
+        setGpsAccuracy(accuracy);
 
         if (!name) setName(userName || "");
         if (!phone) setPhone(userPhone || "");
 
         // OpenStreetMap Nominatim reverse lookup
-        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`)
+        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${rawLat}&lon=${rawLng}`)
           .then((res) => res.json())
           .then((data) => {
             if (data && data.display_name) {
@@ -116,13 +130,13 @@ export default function LocationOnboardingModal({
                 if (fetchedPin) setPincode(fetchedPin);
               }
             } else {
-              setStreet(`GPS Zone (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
+              setStreet(`GPS Zone (Lat: ${rawLat.toFixed(4)}, Lng: ${rawLng.toFixed(4)})`);
             }
             setStep("confirm");
           })
           .catch((err) => {
             console.error("[GPS Onboarding] Reverse lookup failed:", err);
-            setStreet(`Coordinates (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
+            setStreet(`Coordinates (Lat: ${rawLat.toFixed(4)}, Lng: ${rawLng.toFixed(4)})`);
             setStep("confirm");
           })
           .finally(() => {
@@ -131,11 +145,14 @@ export default function LocationOnboardingModal({
       },
       (error) => {
         console.warn("[GPS Onboarding] Location request errored:", error);
-        setErrorMsg("Permission denied or request timed out. Please enter details manually.");
+        setErrorMsg("GPS not available. Fallback mock-map loaded - please adjust manually.");
         setIsDetecting(false);
+        setLat(28.6139); // Delhi Fallback Coordinates
+        setLng(77.2090); // Delhi Fallback Coordinates
+        setGpsAccuracy(150); // Fallback low accuracy to warn/encourage positioning
         setName(userName || "");
         setPhone(userPhone || "");
-        setStreet("");
+        setStreet("National Capital Region, Delhi");
         setStep("confirm");
       },
       { timeout: 7000 }
@@ -170,6 +187,9 @@ export default function LocationOnboardingModal({
       landmark: label,
       state: stateVal.trim(),
       isDefault: isDefault,
+      lat: lat || undefined,
+      lng: lng || undefined,
+      gpsAccuracy: gpsAccuracy || undefined,
     };
 
     if (editingId) {
@@ -287,6 +307,47 @@ export default function LocationOnboardingModal({
                   ))}
                 </div>
               </div>
+
+              {/* Delivery Boundary Map */}
+              {lat && lng && (
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-gray-450 uppercase">Drag Pin to Match Your Doorstep</label>
+                  <DeliveryMap
+                    lat={lat}
+                    lng={lng}
+                    accuracy={gpsAccuracy || undefined}
+                    onLocationChange={(newLat, newLng) => {
+                      setLat(newLat);
+                      setLng(newLng);
+                      // Reverse Lookup
+                      fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${newLat}&lon=${newLng}`)
+                        .then((res) => res.json())
+                        .then((data) => {
+                          if (data && data.display_name) {
+                            setStreet(data.display_name);
+                            if (data.address) {
+                              const fetchedCity = data.address.city || data.address.town || data.address.suburb || data.address.state_district || city;
+                              const fetchedPin = data.address.postcode || pincode;
+                              const fetchedState = data.address.state || stateVal;
+                              setCity(fetchedCity);
+                              setStateVal(fetchedState);
+                              if (fetchedPin) setPincode(fetchedPin);
+                            }
+                          }
+                        })
+                        .catch((err) => console.warn("Map drag reverse geocode failed:", err));
+                    }}
+                  />
+                  {gpsAccuracy && gpsAccuracy > 100 && (
+                    <div className="p-2 border border-yellow-250 bg-yellow-50 text-yellow-800 rounded-xl text-[10.5px] font-bold flex items-start gap-1.5 animate-pulse leading-normal">
+                      <span>⚠️</span>
+                      <span>
+                        Low GPS accuracy ({gpsAccuracy.toFixed(0)}m). Please drag the green pin on the map to confirm your delivery spot.
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3.5">
                 <div>

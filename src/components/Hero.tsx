@@ -20,7 +20,7 @@ const BANNERS: Banner[] = [
     subtitle: "From farm-fresh organic vegetables to dairy essentials, get everything delivered to your doorstep in 15 minutes flat.",
     highlightText: "Quality products at affordable prices",
     colorClass: "from-green-600 to-emerald-800",
-    imgUrl: "images/grocery.jpg",
+    imgUrl: "https://res.cloudinary.com/dkduejkuj/image/upload/v1781242107/grocery_ali1ph.jpg",
   },
   {
     id: "b2",
@@ -29,7 +29,7 @@ const BANNERS: Banner[] = [
     subtitle: "Sourced directly from local sustainable farms. Sweet mangoes, crisp gala apples, and pure green spinach ready to deliver.",
     highlightText: "Farm-to-table freshness guaranteed",
     colorClass: "from-orange-500 to-red-600",
-    imgUrl: "images/fruits.jpg",
+    imgUrl: "https://res.cloudinary.com/dkduejkuj/image/upload/v1781242025/fruits_lvf6ip.jpg",
   },
   {
     id: "b3",
@@ -38,7 +38,7 @@ const BANNERS: Banner[] = [
     subtitle: "Score amazing combo deals on premium potato crisps, double-choc cookies, and chilled cold sodas for your late night streams.",
     highlightText: "Save ₹20 flat on snacks",
     colorClass: "from-slate-800 to-indigo-900 border border-slate-750",
-    imgUrl: "images/drinks.jpg",
+    imgUrl: "https://res.cloudinary.com/dkduejkuj/image/upload/v1781242104/drinks_aokc9l.webp",
   }
 ];
 

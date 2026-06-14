@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useLanguage } from "../lib/LanguageContext";
 import { Search, ShoppingBag, User, MapPin, Heart, ShieldAlert, Sparkles, X, Clock, ChevronDown, Bike } from "lucide-react";
 import { Product, Address, Rider } from "../types";
 
@@ -47,6 +48,7 @@ export default function Header({
   setRiderSession,
   userRole = "Guest",
 }: HeaderProps) {
+  const { t } = useLanguage();
   const [searchVal, setSearchVal] = useState("");
   const [suggestions, setSuggestions] = useState<Product[]>([]);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
@@ -149,7 +151,7 @@ export default function Header({
             </span>
             <div className="hidden sm:flex items-center text-[10px] font-bold text-green-600 uppercase tracking-wider">
               <Sparkles className="mr-0.5 h-3 w-3 animate-pulse" />
-              15 Min Delivery
+              {t("15 Min Delivery")}
             </div>
           </div>
         </div>
@@ -163,10 +165,10 @@ export default function Header({
             <MapPin className="h-4.5 w-4.5 text-orange-500 shrink-0" />
             <div className="max-w-[140px] truncate">
               <div className="text-[10px] leading-tight font-semibold text-gray-400 uppercase">
-                Delivering to {currentAddress?.label || "Home"}
+                {t("Delivering to")} {currentAddress?.label || t("Home")}
               </div>
               <div className="text-xs font-bold text-gray-800 truncate">
-                {currentAddress ? `${currentAddress.name}, ${currentAddress.addressLine}` : "Select Address"}
+                {currentAddress ? `${currentAddress.name}, ${currentAddress.addressLine}` : t("Select Address")}
               </div>
             </div>
             <ChevronDown className="h-3.5 w-3.5 text-gray-500 shrink-0" />
@@ -175,7 +177,7 @@ export default function Header({
           {/* Address Dropdown */}
           {showAddressDropdown && (
             <div className="absolute top-12 left-0 w-72 rounded-xl border border-gray-100 bg-white p-3 shadow-xl ring-1 ring-black/5 animate-in fade-in slide-in-from-top-1 duration-150 z-50">
-              <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">Select Delivery Address</h4>
+              <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-1">{t("Select Delivery Address")}</h4>
               <div className="space-y-1.5 max-h-56 overflow-y-auto">
                 {savedAddresses.map((addr) => (
                   <button
@@ -209,7 +211,7 @@ export default function Header({
                   }}
                   className="w-full text-center py-1.5 rounded-lg text-xs font-bold text-green-600 hover:bg-green-50/50 transition"
                 >
-                  Manage Addresses in Profile
+                  {t("Manage Addresses in Profile")}
                 </button>
               </div>
             </div>
@@ -222,7 +224,7 @@ export default function Header({
             <Search className="h-4.5 w-4.5 text-gray-400 mr-2 shrink-0" />
             <input
               type="text"
-              placeholder='Search milk, bananas, fresh organic bread...'
+              placeholder={t("Search milk, bananas, fresh organic bread...")}
               value={searchVal}
               onChange={(e) => handleSearchChange(e.target.value)}
               onFocus={() => setShowSuggests(true)}
@@ -338,7 +340,6 @@ export default function Header({
             <button
               onClick={() => {
                 setActiveTab("rider");
-                window.location.hash = "rider";
               }}
               className={`p-2 rounded-xl transition flex items-center space-x-1 sm:space-x-1.5 border shrink-0 ${
                 activeTab === "rider"

@@ -12,13 +12,23 @@ app.use(express.json());
 
 // Reusable SMTP configuration resolver
 function getSmtpConfig() {
+  let fromDefault = "SmartCart Support <noreply@smartcart.local>";
+  if (process.env.SMTP_FROM) {
+    const rawFrom = process.env.SMTP_FROM.trim();
+    if (rawFrom.includes("<")) {
+      fromDefault = rawFrom.replace(/^[^<]+/, "SmartCart Support ");
+    } else {
+      fromDefault = `"SmartCart Support" <${rawFrom}>`;
+    }
+  }
+
   return {
     host: process.env.SMTP_HOST || "",
     port: parseInt(process.env.SMTP_PORT || "587"),
     secure: process.env.SMTP_SECURE === "true" || process.env.SMTP_PORT === "465",
     user: process.env.SMTP_USER || "",
     pass: process.env.SMTP_PASS || "",
-    from: process.env.SMTP_FROM || "SmartCart <noreply@smartcart.local>"
+    from: fromDefault
   };
 }
 
@@ -51,6 +61,11 @@ async function sendSmtpEmail({ to, subject, html, text }: { to: string; subject:
     subject,
     text,
     html,
+    headers: {
+      "X-Priority": "3", // Normal
+      "Importance": "normal",
+      "X-Entity-Ref-ID": `${Date.now()}-${to}`,
+    }
   });
 }
 
@@ -67,40 +82,55 @@ apiRouter.post("/send-otp", async (req, res) => {
 
   console.log(`[SmartCart SMTP] Received OTP request for code: ${email} -> ${otp} (isResend: ${!!isResend})`);
 
-  const templateTitle = isResend ? "Resent Security Verification Code" : "Welcome to SmartCart! Verify Your Email";
-  const templateDescription = isResend 
-    ? "As requested, a fresh, secure OTP has been generated for your registration. This code is valid for <strong>5 minutes</strong>."
-    : "Use the secure verification code below to verify your email address and authorize your account registration. This code is valid for <strong>5 minutes</strong>.";
-
+  const templateTitle = "SmartCart Account Verification";
+  
   const htmlContent = `
-    <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 500px; margin: 0 auto; padding: 32px 24px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; color: #1e293b;">
-      <div style="text-align: center; margin-bottom: 24px;">
-        <h2 style="color: #16a34a; margin: 0; font-size: 26px; font-weight: 800; tracking-tight: -0.025em; font-family: sans-serif;">SmartCart</h2>
-        <p style="color: #64748b; font-size: 14px; margin-top: 6px; margin-bottom: 0; font-weight: 500;">SMTP Transactional Dispatcher</p>
-      </div>
-      <p style="font-size: 16px; line-height: 24px; color: #334155; margin-top: 0; font-weight: 600;">Hello ${name || "Customer"},</p>
-      <p style="font-size: 14px; line-height: 22px; color: #475569; margin-bottom: 24px;">
-        ${templateDescription}
-      </p>
-      <div style="background-color: #f0fdf4; border: 1px dashed #16a34a; border-radius: 12px; padding: 20px; text-align: center; margin-bottom: 24px;">
-        <span style="font-family: monospace; font-size: 34px; font-weight: 800; letter-spacing: 8px; color: #15803d; display: inline-block;">${otp}</span>
-      </div>
-      <p style="font-size: 13px; line-height: 18px; color: #64748b; margin-top: 0; margin-bottom: 16px;">
-        This transmitter serves as the designated email verification gateway. If you did not initiate this request, you can safely ignore this correspondence.
-      </p>
-      <hr style="border: 0; border-top: 1px solid #f1f5f9; margin: 24px 0;" />
-      <div style="text-align: center; font-size: 11px; color: #94a3b8; font-weight: 500;">
-        &copy; ${new Date().getFullYear()} SmartCart Inc. Powered by high-durability SMTP service.
+    <div style="background-color: #f8fafc; padding: 40px 20px; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 16px; line-height: 1.5; color: #1e293b;">
+      <div style="max-width: 520px; margin: 0 auto; background-color: #ffffff; border: 1px solid #f1f5f9; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05); overflow: hidden;">
+        <!-- Branding Header -->
+        <div style="background-color: #f0fdf4; border-bottom: 1px solid #bbf7d0; padding: 24px; text-align: center;">
+          <h1 style="color: #15803d; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.03em;">SmartCart</h1>
+          <p style="color: #166534; font-size: 13px; margin: 4px 0 0 0; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Account Verification</p>
+        </div>
+        
+        <!-- Email Body -->
+        <div style="padding: 32px 24px;">
+          <p style="margin-top: 0; font-size: 16px; font-weight: 650; color: #0f172a;">Hello ${name || "Customer"},</p>
+          <p style="font-size: 14px; line-height: 1.6; color: #334155; margin-bottom: 24px;">
+            ${isResend 
+              ? "As requested, a fresh, secure OTP has been generated for your registration. This code is valid for <strong>10 minutes</strong>." 
+              : "Thank you for joining SmartCart! Please use the secure verification code below to complete your sign-up process. This code is valid for <strong>10 minutes</strong>."}
+          </p>
+          
+          <!-- OTP Box -->
+          <div style="background-color: #f0fdf4; border: 1px dashed #16a34a; border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 24px;">
+            <p style="font-size: 11px; font-weight: 700; color: #166534; text-transform: uppercase; letter-spacing: 0.1em; margin: 0 0 12px 0;">YOUR VERIFICATION CODE</p>
+            <span style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #15803d; display: inline-block;">${otp}</span>
+          </div>
+          
+          <p style="font-size: 13px; line-height: 1.6; color: #64748b; margin-top: 0; margin-bottom: 12px;">
+            This verification code expires in <strong>10 minutes</strong>. After expiration, you will need to request a new code.
+          </p>
+          <p style="font-size: 13px; line-height: 1.6; color: #64748b; margin: 0;">
+            If you did not request this code, please ignore this email.
+          </p>
+        </div>
+        
+        <!-- Footer Info -->
+        <div style="background-color: #fafafa; border-top: 1px solid #f3f4f6; padding: 16px 24px; text-align: center; font-size: 11px; color: #94a3b8; font-weight: 500;">
+          &copy; ${new Date().getFullYear()} SmartCart Support. All rights reserved.<br />
+          Delivered securely via SmartCart Transactional Gateway.
+        </div>
       </div>
     </div>
   `;
 
-  const textContent = `${templateTitle}\n\nHello ${name || "Customer"},\n\nYour security OTP verification code is: ${otp}\n\nThis OTP is valid for 5 minutes.`;
+  const textContent = `SmartCart Account Verification\n\nHello ${name || "Customer"},\n\nYour security OTP verification code is: ${otp}\n\nThis OTP is valid for 10 minutes. If you did not request this code, please ignore this email.`;
 
   try {
     await sendSmtpEmail({
       to: email,
-      subject: isResend ? `[SmartCart] Resent Code: ${otp}` : `[SmartCart] Verification Code: ${otp}`,
+      subject: templateTitle,
       html: htmlContent,
       text: textContent
     });
@@ -108,7 +138,7 @@ apiRouter.post("/send-otp", async (req, res) => {
     console.log(`[SmartCart SMTP] Verification email delivery succeeded to mail: ${email}`);
     return res.json({ 
       success: true, 
-      message: "OTP sent successfully" // Requirement 5
+      message: "OTP sent successfully"
     });
 
   } catch (error: any) {

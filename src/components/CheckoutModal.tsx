@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { X, MapPin, ChevronRight, Check, Plus, ArrowLeft, ShieldCheck, Compass, Loader2 } from "lucide-react";
 import { Address } from "../types";
+import DeliveryMap from "./DeliveryMap";
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -39,6 +40,9 @@ export default function CheckoutModal({
   const [newIsDefault, setNewIsDefault] = useState(false);
   const [formError, setFormError] = useState("");
   const [isDetecting, setIsDetecting] = useState(false);
+  const [newLat, setNewLat] = useState<number | null>(null);
+  const [newLng, setNewLng] = useState<number | null>(null);
+  const [newGpsAccuracy, setNewGpsAccuracy] = useState<number | null>(null);
 
   // Payment State
   const [payMethod, setPayMethod] = useState("Cash on Delivery (COD)");
@@ -60,11 +64,15 @@ export default function CheckoutModal({
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
+        const rawLat = position.coords.latitude;
+        const rawLng = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+        setNewLat(rawLat);
+        setNewLng(rawLng);
+        setNewGpsAccuracy(accuracy);
 
         // Query OpenStreetMap Nominatim for Reverse Geocoding (Fully client-side, keyless)
-        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`)
+        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${rawLat}&lon=${rawLng}`)
           .then((res) => res.json())
           .then((data) => {
             if (data && data.display_name) {
@@ -78,12 +86,12 @@ export default function CheckoutModal({
                 if (pinVal) setNewPincode(pinVal);
               }
             } else {
-              setNewStreet(`Estimated Location (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
+              setNewStreet(`Estimated Location (Lat: ${rawLat.toFixed(4)}, Lng: ${rawLng.toFixed(4)})`);
             }
           })
           .catch((err) => {
             console.error("[SmartCart Geolocation] OSM lookup failed, using coordinates:", err);
-            setNewStreet(`Coordinates (Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)})`);
+            setNewStreet(`Coordinates (Lat: ${rawLat.toFixed(4)}, Lng: ${rawLng.toFixed(4)})`);
           })
           .finally(() => {
             setIsDetecting(false);
@@ -91,7 +99,10 @@ export default function CheckoutModal({
       },
       (error) => {
         console.warn("[SmartCart Geolocation] Permission denied or timed out:", error);
-        setFormError("Could not retrieve GPS coordinates. Please check location permissions or input manually.");
+        setFormError("GPS not available. Fallback mock-map loaded - please drag pin manually.");
+        setNewLat(28.6139); // Delhi Fallback
+        setNewLng(77.2090); // Delhi Fallback
+        setNewGpsAccuracy(150);
         setIsDetecting(false);
       },
       { timeout: 8000 }
@@ -130,6 +141,9 @@ export default function CheckoutModal({
         landmark: newLabel,
         state: newStateVal.trim(),
         isDefault: newIsDefault,
+        lat: newLat || undefined,
+        lng: newLng || undefined,
+        gpsAccuracy: newGpsAccuracy || undefined,
       }, newIsDefault);
 
       // Reset Address Form State
@@ -140,6 +154,8 @@ export default function CheckoutModal({
       setNewPincode("");
       setNewPhone("");
       setNewIsDefault(false);
+      setNewLat(null);
+      setNewLng(null);
       setFormError("");
     } catch (err: any) {
       console.error("[CheckoutModal] Failed to save address:", err);
@@ -314,6 +330,48 @@ export default function CheckoutModal({
                     ))}
                   </div>
                 </div>
+
+                {/* Interactive Map */}
+                {newLat && newLng && (
+                  <div className="col-span-full space-y-1.5 mt-2">
+                    <label className="text-[10px] font-black text-gray-500 uppercase tracking-wider">Drag Pin to Match Your Doorstep</label>
+                    <DeliveryMap
+                      lat={newLat}
+                      lng={newLng}
+                      accuracy={newGpsAccuracy || undefined}
+                      onLocationChange={(newLatVal, newLngVal) => {
+                        setNewLat(newLatVal);
+                        setNewLng(newLngVal);
+                        
+                        // Reverse Lookups
+                        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${newLatVal}&lon=${newLngVal}`)
+                          .then((res) => res.json())
+                          .then((data) => {
+                            if (data && data.display_name) {
+                              setNewStreet(data.display_name);
+                              if (data.address) {
+                                const cityVal = data.address.city || data.address.town || data.address.suburb || data.address.state_district || newCity;
+                                const pinVal = data.address.postcode || newPincode;
+                                const stateVal = data.address.state || newStateVal;
+                                setNewCity(cityVal);
+                                setNewStateVal(stateVal);
+                                if (pinVal) setNewPincode(pinVal);
+                              }
+                            }
+                          })
+                          .catch((err) => console.warn("Map drag reverse lookup failed:", err));
+                      }}
+                    />
+                    {newGpsAccuracy && newGpsAccuracy > 100 && (
+                      <div className="p-2.5 border border-yellow-250 bg-yellow-50 text-yellow-850 rounded-xl text-[10.5px] font-bold flex items-start gap-1.5 animate-pulse leading-normal">
+                        <span>⚠️</span>
+                        <span>
+                          Low GPS accuracy ({newGpsAccuracy.toFixed(0)}m). Please drag the green pin on the map to focus directly on your entrance.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label className="text-[10px] font-bold text-gray-400 uppercase">Contact Recipient Name *</label>

@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import DeliveryMap from "./DeliveryMap";
+import { useLanguage } from "../lib/LanguageContext";
 import { 
   User, 
   Package, 
@@ -198,7 +200,7 @@ export default function UserProfile({
     const email = emailInput.trim().toLowerCase();
     const generatedCode = String(Math.floor(100000 + Math.random() * 900000));
     setSimulatedOtp(generatedCode);
-    const expires = Date.now() + 5 * 60 * 1000;
+    const expires = Date.now() + 10 * 60 * 1000;
     setOtpExpiresAt(expires);
     setResendCooldown(30);
 
@@ -257,6 +259,9 @@ export default function UserProfile({
   const [aIsDefault, setAIsDefault] = useState(false);
   const [addrError, setAddrError] = useState("");
   const [isDetecting, setIsDetecting] = useState(false);
+  const [aLat, setALat] = useState<number | null>(null);
+  const [aLng, setALng] = useState<number | null>(null);
+  const [aGpsAccuracy, setAGpsAccuracy] = useState<number | null>(null);
 
   const handleDetectLocationInProfile = () => {
     setIsDetecting(true);
@@ -269,8 +274,12 @@ export default function UserProfile({
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
+        const rawLat = position.coords.latitude;
+        const rawLng = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+        setALat(rawLat);
+        setALng(rawLng);
+        setAGpsAccuracy(accuracy);
 
         if (!aName.trim()) {
           setAName(userName || "Customer Recipient");
@@ -279,7 +288,7 @@ export default function UserProfile({
           setAPhone(userPhone || "");
         }
 
-        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`)
+        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${rawLat}&lon=${rawLng}`)
           .then((res) => res.json())
           .then((data) => {
             if (data && data.display_name) {
@@ -293,12 +302,12 @@ export default function UserProfile({
                 if (pinVal) setAPincode(pinVal);
               }
             } else {
-              setAStreet(`Sector ${Math.floor(lat)} Area, Coordinates: Lat ${lat.toFixed(4)}, Lng ${lng.toFixed(4)}`);
+              setAStreet(`Sector ${Math.floor(rawLat)} Area, Coordinates: Lat ${rawLat.toFixed(4)}, Lng ${rawLng.toFixed(4)}`);
             }
           })
           .catch((err) => {
             console.error("[Profile Geolocation] OSM Lookup Failed:", err);
-            setAStreet(`Coordinates: Lat ${lat.toFixed(4)}, Lng ${lng.toFixed(4)}`);
+            setAStreet(`Coordinates: Lat ${rawLat.toFixed(4)}, Lng ${rawLng.toFixed(4)}`);
           })
           .finally(() => {
             setIsDetecting(false);
@@ -306,7 +315,10 @@ export default function UserProfile({
       },
       (err) => {
         console.warn("[Profile Geolocation] Errored:", err);
-        setAddrError("Could not retrieve GPS coordinates. Please check your browser location permissions.");
+        setAddrError("GPS not available. Fallback mock-map loaded - please drag pin manually.");
+        setALat(28.6139); // Delhi fallback
+        setALng(77.2090); // Delhi fallback
+        setAGpsAccuracy(150);
         setIsDetecting(false);
       },
       { timeout: 8000 }
@@ -315,7 +327,7 @@ export default function UserProfile({
 
   // Settings mock state
   const [notifState, setNotifState] = useState(true);
-  const [langState, setLangState] = useState("English (IN)");
+  const { language: langState, setLanguage: setLangState, t } = useLanguage();
   const [passOld, setPassOld] = useState("");
   const [passNew, setPassNew] = useState("");
   const [passSuccess, setPassSuccess] = useState("");
@@ -370,6 +382,9 @@ export default function UserProfile({
     setAPhone((addr.phone || addr.phoneNumber || "").replace("+91 ", ""));
     setTypeLabel(addr.label || "Home");
     setAIsDefault(!!addr.isDefault);
+    setALat(addr.lat || null);
+    setALng(addr.lng || null);
+    setAGpsAccuracy(addr.gpsAccuracy || null);
     const element = document.getElementById("address-form-header");
     if (element) {
       element.scrollIntoView({ behavior: "smooth" });
@@ -387,6 +402,9 @@ export default function UserProfile({
     setAPhone("");
     setAIsDefault(false);
     setTypeLabel("Home");
+    setALat(null);
+    setALng(null);
+    setAGpsAccuracy(null);
   };
 
   const handleAddNewAddress = async (e: React.FormEvent) => {
@@ -424,6 +442,9 @@ export default function UserProfile({
       state: aStateVal.trim(),
       createdAt: currentEditingRecord?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      lat: aLat || undefined,
+      lng: aLng || undefined,
+      gpsAccuracy: aGpsAccuracy || undefined,
     };
 
     onAddAddress(addedAddressRecord);
@@ -437,6 +458,9 @@ export default function UserProfile({
     setAPincode("");
     setAPhone("");
     setAIsDefault(false);
+    setALat(null);
+    setALng(null);
+    setAGpsAccuracy(null);
     setAddrError("");
   };
 
@@ -664,7 +688,7 @@ export default function UserProfile({
 
       const generatedCode = String(Math.floor(100000 + Math.random() * 900000));
       setSimulatedOtp(generatedCode);
-      const expires = Date.now() + 5 * 60 * 1000; // 5 minutes expiration
+      const expires = Date.now() + 10 * 60 * 1000; // 10 minutes expiration
       setOtpExpiresAt(expires);
       setResendCooldown(30); // 30s resend cooldown
 
@@ -1001,7 +1025,7 @@ export default function UserProfile({
                         <Mail className="h-4 w-4 animate-bounce" /> Code Sent to {emailInput}
                       </p>
                       <p className="text-[9px] font-bold text-orange-500 uppercase tracking-wider mt-1.5 flex items-center gap-1">
-                        <Clock className="h-3 w-3" /> Expires in {timeRemaining || "5:00"}
+                        <Clock className="h-3 w-3" /> Expires in {timeRemaining || "10:00"}
                       </p>
                     </div>
 
@@ -1033,8 +1057,8 @@ export default function UserProfile({
                           onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ""))}
                         />
                       </div>
-                      <p className="text-[10px] text-gray-500 mt-2 bg-gray-55 p-2 rounded-xl border border-gray-150 leading-relaxed text-left">
-                        Didn't receive the OTP? Please check your Spam/Junk folder. OTP emails may sometimes be filtered there.
+                      <p className="text-[10px] text-amber-900 font-extrabold mt-2 bg-amber-50 p-2.5 rounded-xl border border-amber-200 leading-relaxed text-left shadow-2xs shadow-amber-100/50">
+                        Didn't receive the OTP? Please check your Spam/Junk folder.
                       </p>
                     </div>
 
@@ -1153,7 +1177,7 @@ export default function UserProfile({
               >
                 <span className="flex items-center space-x-2">
                   <Package className="h-4.5 w-4.5" />
-                  <span>My Orders ({orders.length})</span>
+                  <span>{t("My Orders")} ({orders.length})</span>
                 </span>
                 <span className={`text-[10px] px-1.5 rounded-full ${subTab === "history" ? "bg-white/20 text-white" : "bg-gray-100"}`}>
                   {orders.filter((o) => o.status !== "delivered").length} Live
@@ -1167,7 +1191,7 @@ export default function UserProfile({
                 }`}
               >
                 <User className="h-4.5 w-4.5" />
-                <span>Personal Information</span>
+                <span>{t("Personal Information")}</span>
               </button>
 
               <button
@@ -1177,7 +1201,7 @@ export default function UserProfile({
                 }`}
               >
                 <MapPin className="h-4.5 w-4.5" />
-                <span>Saved Addresses ({savedAddresses.length})</span>
+                <span>{t("Saved Addresses")} ({savedAddresses.length})</span>
               </button>
 
               <button
@@ -1187,7 +1211,7 @@ export default function UserProfile({
                 }`}
               >
                 <Settings className="h-4.5 w-4.5" />
-                <span>Preferences & Settings</span>
+                <span>{t("Preferences & Settings")}</span>
               </button>
 
               <button
@@ -1197,7 +1221,7 @@ export default function UserProfile({
                 className="w-full flex items-center space-x-2 rounded-xl p-2.5 text-xs text-left text-red-500 hover:bg-red-50 font-bold transition mt-2 pt-3 border-t border-gray-100 cursor-pointer"
               >
                 <LogOut className="h-4.5 w-4.5" />
-                <span>Disconnect Phone</span>
+                <span>{t("Log Out")}</span>
               </button>
             </div>
 
@@ -1492,7 +1516,7 @@ export default function UserProfile({
 
                 <form onSubmit={handleSaveProfile} className="space-y-4 max-w-lg">
                   <div>
-                    <label className="text-[10px] font-black text-gray-450 uppercase">Full Identity Name</label>
+                    <label className="text-[10px] font-black text-gray-450 uppercase">{t("Full Identity Name")}</label>
                     <input
                       type="text"
                       className="w-full mt-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold focus:border-green-500 focus:ring-1 focus:ring-green-500"
@@ -1503,7 +1527,7 @@ export default function UserProfile({
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-black text-gray-445 uppercase">Contact Number</label>
+                    <label className="text-[10px] font-black text-gray-445 uppercase">{t("Contact Number")}</label>
                     <input
                       type="tel"
                       className="w-full mt-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold focus:border-green-500 focus:ring-1 focus:ring-green-500"
@@ -1514,7 +1538,7 @@ export default function UserProfile({
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-black text-gray-440 uppercase">E-Mail Address</label>
+                    <label className="text-[10px] font-black text-gray-440 uppercase">{t("E-Mail Address")}</label>
                     <input
                       type="email"
                       className="w-full mt-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold focus:border-green-500 focus:ring-1 focus:ring-green-500"
@@ -1543,13 +1567,13 @@ export default function UserProfile({
                           }}
                           className="px-4 py-2 border border-gray-200 text-xs font-bold rounded-xl"
                         >
-                          Cancel
+                          {t("Cancel")}
                         </button>
                         <button
                           type="submit"
                           className="px-5 py-2 bg-green-500 hover:bg-green-600 text-white font-black text-xs rounded-xl transition"
                         >
-                          Save Changes
+                          {t("Save Changes")}
                         </button>
                       </>
                     ) : (
@@ -1558,7 +1582,7 @@ export default function UserProfile({
                         onClick={() => setIsEditing(true)}
                         className="px-5 py-2.5 bg-gray-900 hover:bg-gray-800 text-white font-black text-xs rounded-xl transition"
                       >
-                        Edit Profile Details
+                        {t("Edit Profile Details")}
                       </button>
                     )}
                   </div>
@@ -1678,6 +1702,48 @@ export default function UserProfile({
                         ))}
                       </div>
                     </div>
+
+                    {/* Interactive Map integration */}
+                    {aLat && aLng && (
+                      <div className="col-span-2 space-y-1.5 mt-1">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-wider">Drag Pin to Match Your Doorstep</label>
+                        <DeliveryMap
+                          lat={aLat}
+                          lng={aLng}
+                          accuracy={aGpsAccuracy || undefined}
+                          onLocationChange={(newLat, newLng) => {
+                            setALat(newLat);
+                            setALng(newLng);
+                            
+                            // Reverse lookup Osm Nominatims
+                            fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${newLat}&lon=${newLng}`)
+                              .then((res) => res.json())
+                              .then((data) => {
+                                if (data && data.display_name) {
+                                  setAStreet(data.display_name);
+                                  if (data.address) {
+                                    const cityVal = data.address.city || data.address.town || data.address.suburb || data.address.state_district || aCity;
+                                    const pinVal = data.address.postcode || aPincode;
+                                    const stateVal = data.address.state || aStateVal;
+                                    setACity(cityVal);
+                                    setAStateVal(stateVal);
+                                    if (pinVal) setAPincode(pinVal);
+                                  }
+                                }
+                              })
+                              .catch((err) => console.warn("Map drag reverse geocode failed skipped:", err));
+                          }}
+                        />
+                        {aGpsAccuracy && aGpsAccuracy > 100 && (
+                          <div className="p-2 border border-yellow-250 bg-yellow-50 text-yellow-800 rounded-xl text-[10.5px] font-bold flex items-start gap-1.5 animate-pulse leading-normal">
+                            <span>⚠️</span>
+                            <span>
+                              Low GPS accuracy ({aGpsAccuracy.toFixed(0)}m). Please drag the green pin on the map to confirm your delivery spot.
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     <div>
                       <label className="text-[9px] font-bold text-gray-400 uppercase">Recipient Name *</label>
@@ -1839,26 +1905,24 @@ export default function UserProfile({
                         <Languages className="h-4.5 w-4.5" />
                       </div>
                       <div>
-                        <h4 className="text-xs font-black text-gray-800 leading-none">Language Presets</h4>
-                        <p className="text-[10px] text-gray-400 mt-0.5 font-medium">Select localized website strings</p>
+                        <h4 className="text-xs font-black text-gray-800 leading-none">{t("Languages")}</h4>
+                        <p className="text-[10px] text-gray-400 mt-0.5 font-medium">{t("Select localized website strings")}</p>
                       </div>
                     </div>
                     
                     <select
                       value={langState}
-                      onChange={(e) => setLangState(e.target.value)}
+                      onChange={(e) => setLangState(e.target.value as any)}
                       className="rounded-lg border border-gray-200 bg-white p-1 px-2.5 text-xs font-bold focus:border-green-500 outline-hidden"
                     >
                       <option value="English (IN)">English (IN)</option>
                       <option value="Hindi (हिन्दी)">Hindi (हिन्दी)</option>
-                      <option value="Spanish (ES)">Spanish (ES)</option>
-                      <option value="Bengali (বাংলা)">Bengali (বাংলা)</option>
                     </select>
                   </div>
 
                   {/* Reset Password details mock */}
                   <form onSubmit={handleResetPassword} className="border-t border-gray-100 pt-5 space-y-3">
-                    <h4 className="text-xs font-black text-gray-700 uppercase tracking-wide">Change Security Key Code</h4>
+                    <h4 className="text-xs font-black text-gray-700 uppercase tracking-wide">{t("Change Password")}</h4>
                     
                     <div>
                       <input
@@ -1887,7 +1951,7 @@ export default function UserProfile({
                       type="submit"
                       className="px-5 py-2 bg-gray-900 hover:bg-gray-800 text-white font-black text-xs rounded-xl transition"
                     >
-                      Update Security Codes
+                      {t("Update Password")}
                     </button>
                   </form>
 

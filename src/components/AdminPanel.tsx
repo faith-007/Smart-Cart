@@ -652,7 +652,28 @@ export default function AdminPanel({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {orders.map((order) => {
+              {[...orders].sort((a, b) => {
+                const isUndeliveredA = a.status !== "delivered";
+                const isUndeliveredB = b.status !== "delivered";
+                if (isUndeliveredA !== isUndeliveredB) {
+                  return isUndeliveredA ? -1 : 1;
+                }
+                const getOrderTime = (o: Order) => {
+                  if (o.placed_at) {
+                    const parsed = new Date(o.placed_at).getTime();
+                    if (!isNaN(parsed)) return parsed;
+                  }
+                  const parsedDate = Date.parse(o.date);
+                  if (!isNaN(parsedDate)) return parsedDate;
+                  return 0;
+                };
+                const timeA = getOrderTime(a);
+                const timeB = getOrderTime(b);
+                if (timeA !== timeB) {
+                  return timeB - timeA;
+                }
+                return b.id.localeCompare(a.id);
+              }).map((order) => {
                 const isDelivered = order.status === "delivered";
                 const isCancelled = order.status === "cancelled";
                 return (
