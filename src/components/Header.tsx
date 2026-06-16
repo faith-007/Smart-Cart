@@ -127,32 +127,82 @@ export default function Header({
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-gray-100 bg-white/95 backdrop-blur-md shadow-xs">
-      <div className="mx-auto flex flex-wrap md:flex-nowrap md:h-16 items-center justify-between px-3 sm:px-6 lg:px-8 py-2 md:py-0 gap-y-2 md:gap-x-4 max-w-7xl">
+      <div className="mx-auto flex flex-col md:flex-row md:h-16 items-center justify-between px-3.5 sm:px-6 lg:px-8 py-1.5 md:py-0 gap-y-1.5 md:gap-x-4 max-w-7xl">
         
-        {/* Branding Logo */}
-        <div 
-          onClick={() => {
-            setActiveTab("home");
-            setSearchVal("");
-            onSearch("");
-          }}
-          className="flex cursor-pointer items-center space-x-2"
-          id="header-brand-logo"
-        >
-          <img 
-            src={brandLogo} 
-            alt="SmartCart Logo" 
-            className="h-10 w-10 object-contain rounded-xl shadow-md shadow-green-100 transition-transform active:scale-95" 
-            referrerPolicy="no-referrer"
-          />
-          <div>
-            <span className="font-extrabold text-l sm:text-2xl tracking-tight text-gray-900">
-              Smart<span className="text-orange-500">Cart</span>
-            </span>
-            <div className="hidden sm:flex items-center text-[10px] font-bold text-green-600 uppercase tracking-wider">
-              <Sparkles className="mr-0.5 h-3 w-3 animate-pulse" />
-              {t("15 Min Delivery")}
+        {/* Top-Row Container: Logo and Mobile Actions */}
+        <div className="flex w-full md:w-auto items-center justify-between">
+          {/* Branding Logo */}
+          <div 
+            onClick={() => {
+              setActiveTab("home");
+              setSearchVal("");
+              onSearch("");
+            }}
+            className="flex cursor-pointer items-center space-x-1.5 md:space-x-2 animate-fade-in"
+            id="header-brand-logo"
+          >
+            <img 
+              src={brandLogo} 
+              alt="SmartCart Logo" 
+              className="h-7.5 w-7.5 md:h-10 md:w-10 object-contain rounded-lg md:rounded-xl shadow-md shadow-green-150 transition-transform active:scale-95" 
+              referrerPolicy="no-referrer"
+            />
+            <div>
+              <span className="font-extrabold text-sm md:text-2xl tracking-tight text-gray-900 leading-none">
+                Smart<span className="text-orange-500 font-extrabold">Cart</span>
+              </span>
+              <div className="hidden sm:flex items-center text-[10px] font-bold text-green-600 uppercase tracking-wider leading-none mt-0.5">
+                <Sparkles className="mr-0.5 h-3 w-3 animate-pulse" />
+                {t("15 Min Delivery")}
+              </div>
             </div>
+          </div>
+
+          {/* Mobile Action Menu (Wishlist & Admin Shortcuts) */}
+          <div className="flex md:hidden items-center space-x-1 sm:space-x-2">
+            {/* Admin Portal Shortcut */}
+            {(isCustomerLoggedIn && userEmail === "himanshu712007@gmail.com") && (
+              <button
+                onClick={() => setActiveTab("admin")}
+                className={`p-1.5 rounded-lg transition flex items-center space-x-1 border shrink-0 ${
+                  activeTab === "admin"
+                    ? "bg-orange-50 text-orange-600 border-orange-200"
+                    : "text-orange-600 hover:bg-orange-50 border-orange-100 bg-white"
+                }`}
+                title="Admin Portal"
+              >
+                <ShieldAlert className="h-4 w-4" />
+              </button>
+            )}
+
+            {/* Rider Portal Shortcut */}
+            {userRole === "Rider" && (
+              <button
+                onClick={() => setActiveTab("rider")}
+                className={`p-1.5 rounded-lg transition flex items-center space-x-1 border shrink-0 ${
+                  activeTab === "rider"
+                    ? "bg-orange-50 text-orange-600 border-orange-200"
+                    : "text-slate-600 hover:bg-slate-50 border-gray-150 bg-white"
+                }`}
+                title="Rider Portal"
+              >
+                <Bike className="h-4 w-4 text-orange-500" />
+              </button>
+            )}
+
+            {/* Wishlist Trigger */}
+            <button
+              onClick={() => setActiveTab("wishlist")}
+              className={`relative p-1.5 rounded-lg transition border ${
+                activeTab === "wishlist"
+                  ? "bg-red-50 text-red-500 border-red-100"
+                  : "text-gray-500 hover:bg-gray-50 hover:text-gray-900 border-gray-100 bg-white"
+              }`}
+              title="Wishlist"
+              id="header-wishlist-button-mobile"
+            >
+              <Heart className={`h-4.5 w-4.5 ${activeTab === "wishlist" ? "fill-red-500" : ""}`} />
+            </button>
           </div>
         </div>
 
@@ -220,8 +270,8 @@ export default function Header({
 
         {/* Smart Search Bar */}
         <div ref={suggestRef} className="relative w-full md:w-auto md:flex-1 max-w-lg order-last md:order-none mx-0 md:mx-6" id="header-search-bar">
-          <div className="flex items-center rounded-xl bg-gray-100 px-3.5 py-2.5 shadow-inner transition focus-within:ring-2 focus-within:ring-green-500 focus-within:bg-white border border-transparent focus-within:border-gray-200">
-            <Search className="h-4.5 w-4.5 text-gray-400 mr-2 shrink-0" />
+          <div className="flex items-center rounded-lg md:rounded-xl bg-gray-50 md:bg-gray-100 px-2.5 py-1.5 md:px-3.5 md:py-2.5 shadow-inner transition focus-within:ring-2 focus-within:ring-green-500 focus-within:bg-white border border-transparent focus-within:border-gray-200">
+            <Search className="h-4 md:h-4.5 w-4 md:w-4.5 text-gray-400 mr-2 shrink-0" />
             <input
               type="text"
               placeholder={t("Search milk, bananas, fresh organic bread...")}
@@ -231,7 +281,7 @@ export default function Header({
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSearchSubmit(searchVal);
               }}
-              className="w-full p-0 text-sm font-medium text-gray-800 bg-transparent placeholder-gray-400 border-0 outline-hidden focus:ring-0"
+              className="w-full p-0 text-xs md:text-sm font-medium text-gray-850 bg-transparent placeholder-gray-400 border-0 outline-hidden focus:ring-0"
             />
             {searchVal && (
               <button 
@@ -242,19 +292,19 @@ export default function Header({
                 }}
                 className="text-gray-400 hover:text-gray-600"
               >
-                <X className="h-4 w-4" />
+                <X className="h-3.5 w-3.5 md:h-4 md:w-4" />
               </button>
             )}
           </div>
 
           {/* Autocomplete & Recent Suggestions */}
           {showSuggests && (
-            <div className="absolute top-12 left-0 right-0 rounded-2xl border border-gray-100 bg-white p-4 shadow-2xl ring-1 ring-black/5 animate-in fade-in slide-in-from-top-2 duration-200 z-50">
+            <div className="absolute top-10 md:top-12 left-0 right-0 rounded-2xl border border-gray-100 bg-white p-3 md:p-4 shadow-2xl ring-1 ring-black/5 animate-in fade-in slide-in-from-top-2 duration-200 z-50">
               
               {/* Autocomplete Products */}
               {suggestions.length > 0 && (
                 <div className="mb-4">
-                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Matching Products</h4>
+                  <h4 className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Matching Products</h4>
                   <div className="space-y-1">
                     {suggestions.map((p) => (
                       <button
@@ -264,7 +314,7 @@ export default function Header({
                           setShowSuggests(false);
                           setSearchVal("");
                         }}
-                        className="w-full flex items-center justify-between p-2 rounded-xl text-left hover:bg-gray-50 transition"
+                        className="w-full flex items-center justify-between p-1.5 md:p-2 rounded-xl text-left hover:bg-gray-50 transition"
                       >
                         <div className="flex items-center space-x-2.5">
                           <img src={p.image} alt={p.name} className="h-8 w-8 rounded-lg object-cover bg-gray-50" />
@@ -284,17 +334,17 @@ export default function Header({
               {recentSearches.length > 0 ? (
                 <div>
                   <div className="flex items-center justify-between mb-2">
-                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Recent Searches</h4>
+                    <h4 className="text-[10px] md:text-xs font-bold text-gray-400 uppercase tracking-wider">Recent Searches</h4>
                     <button onClick={clearRecentSearches} className="text-[10px] font-bold text-orange-500 hover:underline">
                       Clear All
                     </button>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1.5 md:gap-2">
                     {recentSearches.map((term, idx) => (
                       <button
                         key={idx}
                         onClick={() => handleSearchSubmit(term)}
-                        className="flex items-center space-x-1 rounded-full bg-gray-50 border border-gray-100 px-3 py-1.5 text-xs text-gray-600 font-medium hover:bg-gray-100 hover:text-gray-900 transition"
+                        className="flex items-center space-x-1 rounded-full bg-gray-50 border border-gray-100 px-2.5 py-1 md:px-3 md:py-1.5 text-xs text-gray-600 font-medium hover:bg-gray-100 hover:text-gray-900 transition"
                       >
                         <Clock className="h-3 w-3 text-gray-400" />
                         <span>{term}</span>
@@ -313,8 +363,8 @@ export default function Header({
           )}
         </div>
 
-        {/* Actions Menu */}
-        <div className="flex items-center space-x-2.5 sm:space-x-4">
+        {/* Actions Menu (Desktop Only) */}
+        <div className="hidden md:flex items-center space-x-2.5 sm:space-x-4">
           
           {/* Admin Portal Button */}
           {(isCustomerLoggedIn && userEmail === "himanshu712007@gmail.com") && (
@@ -335,7 +385,7 @@ export default function Header({
             </button>
           )}
 
-          {/* Rider Portal Dropdown - Guarded by secure role checks, completely hidden from non-Riders (Customers and Admins) */}
+          {/* Rider Portal Dropdown */}
           {userRole === "Rider" && (
             <button
               onClick={() => {
@@ -373,7 +423,7 @@ export default function Header({
           {/* User Profile */}
           <button
             onClick={() => setActiveTab("profile")}
-            className={`p-2 rounded-xl transition flex items-center space-x-1.5 ${
+            className={`hidden md:flex p-2 rounded-xl transition items-center space-x-1.5 ${
               activeTab === "profile"
                 ? "bg-green-50 text-green-600"
                 : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"
@@ -390,7 +440,7 @@ export default function Header({
           {/* Cart Trigger Button */}
           <button
             onClick={onCartToggle}
-            className="flex items-center space-x-2 rounded-xl bg-orange-500 hover:bg-orange-600 px-3.5 py-2 text-white font-bold text-sm shadow-md shadow-orange-100 transition active:scale-95"
+            className="hidden md:flex items-center space-x-2 rounded-xl bg-orange-500 hover:bg-orange-600 px-3.5 py-2 text-white font-bold text-sm shadow-md shadow-orange-100 transition active:scale-95"
             id="header-cart-button"
           >
             <div className="relative">

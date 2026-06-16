@@ -21,13 +21,13 @@ export default function Categories({
   onSelectCategory,
 }: CategoriesProps) {
   return (
-    <div className="py-4 bg-white border-y border-gray-100" id="categories-filter-section">
+    <div className="py-2.5 md:py-4 bg-white border-y border-gray-100" id="categories-filter-section">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-2.5 md:mb-4">
           <div>
-            <h2 className="text-lg font-black text-gray-800 tracking-tight">Shop by Category</h2>
-            <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider">Fresh ingredients in minutes</p>
+            <h2 className="text-sm md:text-lg font-black text-gray-800 tracking-tight">Shop by Category</h2>
+            <p className="text-[10px] md:text-xs text-gray-400 font-semibold uppercase tracking-wider">Fresh in 15 minutes</p>
           </div>
           {selectedCategory && (
             <button
@@ -40,23 +40,25 @@ export default function Categories({
         </div>
 
         {/* Horizontal scrollable categories layout */}
-        <div className="flex overflow-x-auto pb-2 scrollbar-none gap-3 sm:gap-4 -mx-4 px-4 sm:mx-0 sm:px-0">
+        <div className="flex overflow-x-auto pb-1.5 scrollbar-none gap-2 md:gap-4 -mx-4 px-4 sm:mx-0 sm:px-0">
           
           {/* "All" button first */}
           <button
             onClick={() => onSelectCategory(null)}
-            className={`flex flex-col items-center shrink-0 w-20 p-2.5 rounded-2xl transition-all duration-200 border cursor-pointer ${
+            className={`flex flex-col items-center shrink-0 w-16 md:w-20 p-0.5 md:p-2.5 rounded-full md:rounded-2xl border-none md:border cursor-pointer transition-all duration-200 ${
               selectedCategory === null
-                ? "bg-green-500 border-green-500 text-white shadow-lg shadow-green-100 scale-105"
-                : "bg-gray-50 border-gray-50 text-gray-600 hover:bg-gray-100/70 hover:border-gray-200"
+                ? "text-green-600 font-extrabold"
+                : "text-gray-500 font-medium hover:text-gray-900"
             }`}
           >
-            <div className={`flex h-11 w-11 items-center justify-center rounded-xl mb-1.5 transition ${
-              selectedCategory === null ? "bg-white/25" : "bg-white shadow-xs"
+            <div className={`flex h-12 w-12 md:h-11 md:w-11 items-center justify-center rounded-full md:rounded-xl mb-1 transition ${
+              selectedCategory === null
+                ? "bg-green-500 text-white shadow-md shadow-green-100"
+                : "bg-gray-50 hover:bg-gray-100 text-green-600 shadow-xs"
             }`}>
-              <Icons.Grid className={`h-5 w-5 ${selectedCategory === null ? "text-white" : "text-green-600"}`} />
+              <Icons.Grid className="h-5 w-5" />
             </div>
-            <span className="text-[10px] font-black tracking-wide truncate w-full text-center">All Items</span>
+            <span className="text-[10px] md:text-[11px] font-bold tracking-wide mt-0.5 md:mt-0 truncate w-full text-center">All</span>
           </button>
 
           {/* Map of other categories */}
@@ -66,21 +68,23 @@ export default function Categories({
               <button
                 key={cat.id}
                 onClick={() => onSelectCategory(cat.id)}
-                className={`flex flex-col items-center shrink-0 w-20 p-2.5 rounded-2xl transition-all duration-200 border cursor-pointer ${
+                className={`flex flex-col items-center shrink-0 w-16 md:w-20 p-0.5 md:p-2.5 rounded-full md:rounded-2xl border-none md:border cursor-pointer transition-all duration-200 ${
                   isSelected
-                    ? "bg-green-500 border-green-500 text-white shadow-lg shadow-green-100 scale-105"
-                    : "bg-gray-50 border-gray-50 text-gray-600 hover:bg-gray-100/70 hover:border-gray-200"
+                    ? "text-green-600 font-extrabold"
+                    : "text-gray-500 font-medium hover:text-gray-900"
                 }`}
               >
-                <div className={`flex h-11 w-11 items-center justify-center rounded-xl mb-1.5 transition ${
-                  isSelected ? "bg-white/25" : "bg-white shadow-xs"
+                <div className={`flex h-12 w-12 md:h-11 md:w-11 items-center justify-center rounded-full md:rounded-xl mb-1 transition ${
+                  isSelected
+                    ? "bg-green-500 text-white shadow-md shadow-green-100"
+                    : "bg-gray-50 hover:bg-gray-100 text-green-600 shadow-xs"
                 }`}>
                   <IconHelper
                     name={cat.iconName}
-                    className={`h-5 w-5 ${isSelected ? "text-white" : "text-green-600"}`}
+                    className="h-5 w-5"
                   />
                 </div>
-                <span className="text-[10px] font-black tracking-wide truncate w-full text-center">{cat.name}</span>
+                <span className="text-[10px] md:text-[11px] font-bold tracking-wide mt-0.5 md:mt-0 truncate w-full text-center">{cat.name}</span>
               </button>
             );
           })}

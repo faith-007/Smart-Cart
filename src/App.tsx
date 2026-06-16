@@ -7,6 +7,7 @@ import { calculatePricing } from "./lib/pricing";
 // Component Imports
 import Header from "./components/Header";
 import Hero from "./components/Hero";
+import MobilePromoBanner from "./components/MobilePromoBanner";
 import Categories from "./components/Categories";
 import ProductCard from "./components/ProductCard";
 import ProductDetailsModal from "./components/ProductDetailsModal";
@@ -36,7 +37,7 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { onSnapshot, collection, query, where } from "firebase/firestore";
 
 // Icons for general UI
-import { Sparkles, Heart, ShoppingBag, ShieldAlert, ArrowLeft, Trash2, Home, AlertCircle, RefreshCw, Star, Info, X } from "lucide-react";
+import { Sparkles, Heart, ShoppingBag, ShieldAlert, ArrowLeft, Trash2, Home, AlertCircle, RefreshCw, Star, Info, X, User } from "lucide-react";
 
 export default function App() {
   const navigate = useNavigate();
@@ -1798,11 +1799,13 @@ export default function App() {
 
         {/* 1. HOME VIEW */}
         {activeTab === "home" && (
-          <main className="animate-fade-in pb-12">
+          <main className="animate-fade-in pb-24 md:pb-12">
             
             {/* Show Hero Promo Carousel ONLY if no category filter or search active */}
             {!selectedCategory && searchQuery.trim() === "" && (
-              <Hero />
+              <div className="hidden md:block">
+                <Hero />
+              </div>
             )}
 
             {/* Shop Categories horizontal filter ribbon */}
@@ -1818,6 +1821,11 @@ export default function App() {
                 }
               }}
             />
+
+            {/* Show Mobile Promo Banner ONLY if no category filter or search active */}
+            {!selectedCategory && searchQuery.trim() === "" && (
+              <MobilePromoBanner />
+            )}
 
             {/* Active Query Ribbon information widget */}
             {(selectedCategory || searchQuery.trim() !== "") && (
@@ -1842,19 +1850,19 @@ export default function App() {
             )}
 
             {/* Products sections */}
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-6" id="catalog-grids-section">
+            <div className="mx-auto max-w-7xl px-1.5 xs:px-3 sm:px-6 lg:px-8 mt-4 md:mt-6 animate-fade-in" id="catalog-grids-section">
               
               {/* If search/category filter is operating, just display standard catalog results */}
               {selectedCategory || searchQuery.trim() !== "" ? (
                 <div>
-                  <h3 className="text-lg font-black text-gray-950 text-left mb-4 tracking-tight">SearchResults ({filteredProducts.length} items found)</h3>
+                  <h3 className="text-sm md:text-lg font-black text-gray-950 text-left mb-3 md:mb-4 tracking-tight">SearchResults ({filteredProducts.length} items found)</h3>
                   {filteredProducts.length === 0 ? (
                     <div className="text-center py-16">
                       <p className="text-xs text-gray-400 font-bold uppercase mb-1">No items match your criteria</p>
                       <p className="text-sm">Try searching for other fresh things like bananas, organic milk, or brown eggs.</p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-5">
+                    <div className="grid grid-cols-3 gap-1.5 xs:gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
                       {filteredProducts.map((p) => (
                         <ProductCard
                           key={p.id}
@@ -1872,18 +1880,18 @@ export default function App() {
                 </div>
               ) : (
                 /* OTHERWISE structures bento blocks: Offers -> Featured -> Top Selling */
-                <div className="gap-8 flex flex-col">
+                <div className="gap-5 md:gap-8 flex flex-col">
                   
                   {/* BEST OFFERS PANEL */}
                   {bestOffersSubset.length > 0 && (
-                    <section className="text-left">
-                      <div className="mb-4">
-                        <span className="text-[10px] bg-orange-100 text-[#F97316] font-bold px-2 py-0.5 rounded uppercase font-black">Daily Essentials</span>
-                        <h3 className="text-lg font-black text-gray-900 tracking-tight mt-1">Best Value Deals</h3>
-                        <p className="text-xs text-gray-400 font-semibold leading-none mt-1">Grab fresh items at the best prices today</p>
+                    <section className="text-left px-1.5 sm:px-0">
+                      <div className="mb-2.5 md:mb-4">
+                        <span className="text-[8px] xs:text-[10px] bg-orange-100 text-[#F97316] font-bold px-1.5 py-0.5 rounded uppercase font-black">Daily Essentials</span>
+                        <h3 className="text-sm md:text-lg font-black text-gray-900 tracking-tight mt-0.5 md:mt-1">Best Value Deals</h3>
+                        <p className="text-[10px] md:text-xs text-gray-400 font-semibold leading-none mt-0.5 md:mt-1">Grab fresh items at the best prices today</p>
                       </div>
 
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
+                      <div className="grid grid-cols-3 gap-1.5 xs:gap-2.5 sm:grid-cols-4">
                         {bestOffersSubset.map((p) => (
                           <ProductCard
                             key={p.id}
@@ -1902,14 +1910,14 @@ export default function App() {
 
                   {/* FEATURED SELECTION */}
                   {featuredSubset.length > 0 && (
-                    <section className="text-left">
-                      <div className="mb-4">
-                        <span className="text-[10px] bg-green-100 text-green-700 font-bold px-2 py-0.5 rounded uppercase font-black">Chef Curations</span>
-                        <h3 className="text-lg font-black text-gray-900 tracking-tight mt-1">Featured Essentials</h3>
-                        <p className="text-xs text-gray-400 font-semibold leading-none mt-1">Gourmet ingredients and pristine household choices</p>
+                    <section className="text-left px-1.5 sm:px-0">
+                      <div className="mb-2.5 md:mb-4">
+                        <span className="text-[8px] xs:text-[10px] bg-green-100 text-green-700 font-bold px-1.5 py-0.5 rounded uppercase font-black">Chef Curations</span>
+                        <h3 className="text-sm md:text-lg font-black text-gray-900 tracking-tight mt-0.5 md:mt-1">Featured Essentials</h3>
+                        <p className="text-[10px] md:text-xs text-gray-400 font-semibold leading-none mt-0.5 md:mt-1">Gourmet ingredients & custom selections</p>
                       </div>
 
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
+                      <div className="grid grid-cols-3 gap-1.5 xs:gap-2.5 sm:grid-cols-4">
                         {featuredSubset.map((p) => (
                           <ProductCard
                             key={p.id}
@@ -1927,14 +1935,14 @@ export default function App() {
                   )}
 
                   {/* TOP SELLING PRODUCTS */}
-                  <section className="text-left">
-                    <div className="mb-4">
-                      <span className="text-[10px] bg-blue-105 text-blue-700 font-bold px-2 py-0.5 rounded uppercase font-black">All Catalog</span>
-                      <h3 className="text-lg font-black text-gray-900 tracking-tight mt-1">Fresh Grocery Catalog</h3>
-                      <p className="text-xs text-gray-400 font-semibold leading-none mt-1">Delivered to your doorstep in 15 minutes</p>
+                  <section className="text-left px-1.5 sm:px-0">
+                    <div className="mb-2.5 md:mb-4">
+                      <span className="text-[8px] xs:text-[10px] bg-blue-100 text-blue-700 font-bold px-1.5 py-0.5 rounded uppercase font-black">All Catalog</span>
+                      <h3 className="text-sm md:text-lg font-black text-gray-900 tracking-tight mt-0.5 md:mt-1">Fresh Grocery Catalog</h3>
+                      <p className="text-[10px] md:text-xs text-gray-400 font-semibold leading-none mt-0.5 md:mt-1">Delivered in 15 minutes</p>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-5">
+                    <div className="grid grid-cols-3 gap-1.5 xs:gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
                       {products.map((p) => (
                         <ProductCard
                           key={p.id}
@@ -1959,7 +1967,7 @@ export default function App() {
 
         {/* 2. WISHLIST VIEW */}
         {activeTab === "wishlist" && (
-          <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 text-left animate-fade-in">
+          <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 pb-24 md:pb-8 text-left animate-fade-in">
             <div className="mb-6 flex items-center justify-between border-b border-gray-100 pb-4">
               <div>
                 <h1 className="text-xl font-black text-gray-950 tracking-tight">Saved Wishlist items</h1>
@@ -2393,6 +2401,86 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* MOBILE FIXED BOTTOM NAVIGATION BAR */}
+      <div className="fixed bottom-0 left-0 right-0 z-55 md:hidden bg-white/95 backdrop-blur-md border-t border-gray-100 shadow-[0_-8px_30px_rgba(0,0,0,0.06)] pb-safe">
+        <div className="flex h-16 items-center justify-around px-4">
+          
+          {/* Home Nav Item */}
+          <button
+            onClick={() => {
+              setIsCartOpen(false);
+              setActiveTab("home");
+            }}
+            className={`flex flex-col items-center justify-center w-24 h-full transition-all duration-200 active:scale-95 cursor-pointer ${
+              activeTab === "home" && !isCartOpen
+                ? "text-green-600 font-extrabold"
+                : "text-gray-400 hover:text-gray-600 font-medium"
+            }`}
+          >
+            <div className="relative flex items-center justify-center">
+              <Home className={`h-5 w-5 transition-transform duration-200 ${activeTab === "home" && !isCartOpen ? "scale-110 stroke-[2.5px]" : "stroke-[2px]"}`} />
+              {activeTab === "home" && !isCartOpen && (
+                <span className="absolute -bottom-1 h-1.5 w-1.5 rounded-full bg-green-600 animate-pulse" />
+              )}
+            </div>
+            <span className="text-[10px] tracking-wider uppercase mt-1 font-sans">
+              Home
+            </span>
+          </button>
+
+          {/* Profile Nav Item */}
+          <button
+            onClick={() => {
+              setIsCartOpen(false);
+              setActiveTab("profile");
+            }}
+            className={`flex flex-col items-center justify-center w-24 h-full transition-all duration-200 active:scale-95 cursor-pointer ${
+              activeTab === "profile" && !isCartOpen
+                ? "text-green-600 font-extrabold"
+                : "text-gray-400 hover:text-gray-600 font-medium"
+            }`}
+          >
+            <div className="relative flex items-center justify-center">
+              <User className={`h-5 w-5 transition-transform duration-200 ${activeTab === "profile" && !isCartOpen ? "scale-110 stroke-[2.5px]" : "stroke-[2px]"}`} />
+              {activeTab === "profile" && !isCartOpen && (
+                <span className="absolute -bottom-1 h-1.5 w-1.5 rounded-full bg-green-600 animate-pulse" />
+              )}
+            </div>
+            <span className="text-[10px] tracking-wider uppercase mt-1 font-sans">
+              Profile
+            </span>
+          </button>
+
+          {/* Cart Nav Item */}
+          <button
+            onClick={() => {
+              setIsCartOpen(true);
+            }}
+            className={`flex flex-col items-center justify-center w-24 h-full transition-all duration-200 active:scale-95 cursor-pointer ${
+              isCartOpen
+                ? "text-green-600 font-extrabold"
+                : "text-gray-400 hover:text-gray-600 font-medium"
+            }`}
+          >
+            <div className="relative flex items-center justify-center">
+              <ShoppingBag className={`h-5 w-5 transition-transform duration-200 ${isCartOpen ? "scale-110 stroke-[2.5px]" : "stroke-[2px]"}`} />
+              {cartCount > 0 && (
+                <span className="absolute -top-1.5 -right-2.5 flex h-4.5 w-4.5 items-center justify-center rounded-full bg-orange-500 text-[9px] font-black text-white ring-2 ring-white animate-bounce" style={{ animationDuration: '2s' }}>
+                  {cartCount}
+                </span>
+              )}
+              {isCartOpen && (
+                <span className="absolute -bottom-1 h-1.5 w-1.5 rounded-full bg-green-600 animate-pulse" />
+              )}
+            </div>
+            <span className="text-[10px] tracking-wider uppercase mt-1 font-sans">
+              Cart
+            </span>
+          </button>
+
+        </div>
+      </div>
 
     </div>
   );

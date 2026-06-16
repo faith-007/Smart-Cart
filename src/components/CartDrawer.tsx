@@ -169,7 +169,7 @@ export default function CartDrawer({
 
         {/* Bill Summary & Pricing Calculations footer */}
         {cartItems.length > 0 && (
-          <div className="border-t border-gray-100 bg-gray-50/70 p-4 space-y-3.5">
+          <div className="border-t border-gray-100 bg-gray-50/70 p-4 space-y-3.5 pb-20 md:pb-4">
             
             {/* Bill Summary List */}
             <div className="space-y-1.5 border-t border-gray-150 pt-3 text-xs font-medium text-gray-600">

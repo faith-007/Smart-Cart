@@ -1145,7 +1145,7 @@ export default function UserProfile({
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6" id="user-profile-section">
+    <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 pb-24 md:pb-6" id="user-profile-section">
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
         
         {/* Left Sub-Menu Column Sidebar wrapper */}

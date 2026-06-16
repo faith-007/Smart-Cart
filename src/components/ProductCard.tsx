@@ -27,21 +27,21 @@ export default function ProductCard({
 
   return (
     <div 
-      className="group relative flex flex-col justify-between rounded-2xl border border-gray-100 bg-white p-3.5 shadow-xs transition-all duration-300 hover:shadow-xl hover:border-gray-200"
+      className="group relative flex flex-col justify-between rounded-xl md:rounded-2xl border border-gray-100 bg-white p-1.5 xs:p-2 sm:p-3.5 shadow-xs transition-all duration-300 hover:shadow-xl hover:border-gray-200 text-left"
       id={`product-card-${product.id}`}
     >
       
       {/* Absolute Badges */}
-      <div className="absolute top-2.5 left-2.5 z-10 flex flex-col gap-1">
+      <div className="absolute top-1.5 left-1.5 z-10 flex flex-col gap-0.5 md:gap-1">
         {product.discount > 0 && (
-          <span className="inline-flex items-center space-x-0.5 rounded-lg bg-orange-500 px-2 py-1 text-[10px] font-black text-white shadow-xs">
-            <TrendingDown className="h-3 w-3" />
+          <span className="inline-flex items-center space-x-0.5 rounded bg-orange-500 px-1 md:px-2 py-0.5 text-[8px] xs:text-[9px] md:text-[10px] font-black text-white shadow-xs">
+            <TrendingDown className="h-2 w-2 md:h-3 md:w-3" />
             <span>{product.discount}% OFF</span>
           </span>
         )}
         
         {product.isBestOffer && (
-          <span className="inline-flex items-center rounded-lg bg-yellow-400 px-2 py-1 text-[10px] font-black text-gray-900 shadow-xs uppercase">
+          <span className="inline-flex items-center rounded bg-yellow-400 px-1 md:px-2 py-0.5 text-[8px] xs:text-[9px] md:text-[10px] font-black text-gray-900 shadow-xs uppercase">
             Super Saver
           </span>
         )}
@@ -53,21 +53,21 @@ export default function ProductCard({
           e.stopPropagation();
           onToggleWishlist(product);
         }}
-        className={`absolute top-2.5 right-2.5 z-10 flex h-8 w-8 items-center justify-center rounded-full border border-gray-50 bg-white/95 shadow-md backdrop-blur-xs transition hover:scale-110 active:scale-95 ${
+        className={`absolute top-1.5 right-1.5 z-10 flex h-6 w-6 xs:h-7 xs:w-7 md:h-8 md:w-8 items-center justify-center rounded-full border border-gray-50 bg-white/95 shadow-md backdrop-blur-xs transition hover:scale-110 active:scale-95 ${
           isWishlisted ? "text-red-500" : "text-gray-400 hover:text-gray-600"
         }`}
         id={`wish-btn-${product.id}`}
       >
-        <Heart className={`h-4.5 w-4.5 ${isWishlisted ? "fill-red-500" : ""}`} />
+        <Heart className={`h-3.5 w-3.5 xs:h-4 xs:w-4 md:h-4.5 md:w-4.5 ${isWishlisted ? "fill-red-500" : ""}`} />
       </button>
 
       {/* Product Image & Info Selection Trigger */}
       <div 
         onClick={() => onSelectProduct(product)}
-        className="cursor-pointer flex flex-col items-center pt-3 align-middle"
+        className="cursor-pointer flex flex-col items-center pt-2 md:pt-3 align-middle"
       >
         
-        <div className="relative overflow-hidden rounded-xl bg-gray-50 h-32 w-32 flex items-center justify-center">
+        <div className="relative overflow-hidden rounded-lg md:rounded-xl bg-gray-50 h-[80px] w-[80px] xs:h-[104px] xs:w-[104px] sm:h-32 sm:w-32 flex items-center justify-center">
           <img
             src={product.image}
             alt={product.name}
@@ -75,88 +75,88 @@ export default function ProductCard({
             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110"
           />
           {isOutOfStock && (
-            <div className="absolute inset-0 bg-white/90 flex flex-col items-center justify-center p-2 text-center">
-              <ShieldAlert className="h-6 w-6 text-red-500 mb-1" />
-              <span className="text-[10px] font-black text-red-600 uppercase tracking-wider">Out of Stock</span>
+            <div className="absolute inset-0 bg-white/90 flex flex-col items-center justify-center p-1 text-center">
+              <ShieldAlert className="h-4.5 w-4.5 text-red-500 mb-0.5" />
+              <span className="text-[8px] font-black text-red-600 uppercase tracking-tight">Sold Out</span>
             </div>
           )}
         </div>
 
         {/* Rating and Reviews */}
-        <div className="mt-3 flex items-center space-x-1.5 self-start">
-          <div className="flex items-center bg-green-50 px-1.5 py-0.5 rounded-md text-[10px] font-extrabold text-green-700">
-            <Star className="h-2.5 w-2.5 fill-green-700 mr-0.5" />
+        <div className="mt-1 md:mt-3 flex items-center space-x-1 self-start">
+          <div className="flex items-center bg-green-50 px-1 py-0.2 rounded text-[8px] xs:text-[9px] md:text-[10px] font-extrabold text-green-700">
+            <Star className="h-2 w-2 md:h-2.5 md:w-2.5 fill-green-700 mr-0.5" />
             <span>{product.rating}</span>
           </div>
-          <span className="text-[10px] text-gray-400 font-semibold">({product.ratingCount})</span>
+          <span className="text-[8px] xs:text-[9px] text-gray-400 font-semibold">({product.ratingCount})</span>
         </div>
 
         {/* Brand & Name */}
-        <div className="mt-1.5 self-start text-left w-full">
-          <p className="text-[10px] font-extrabold text-orange-500 uppercase tracking-widest">{product.brand}</p>
-          <h3 className="text-xs sm:text-sm font-bold text-gray-800 line-clamp-2 leading-tight group-hover:text-green-600 transition min-h-[36px]">
+        <div className="mt-1 self-start text-left w-full">
+          <p className="text-[8px] xs:text-[9px] md:text-[10px] font-extrabold text-orange-500 uppercase tracking-widest">{product.brand}</p>
+          <h3 className="text-[10px] xs:text-xs md:text-sm font-bold text-gray-800 line-clamp-2 leading-tight group-hover:text-green-600 transition min-h-[26px] xs:min-h-[32px] md:min-h-[36px]">
             {product.name}
           </h3>
-          <p className="text-[11px] text-gray-400 font-bold mt-1">{product.weight}</p>
+          <p className="text-[9px] xs:text-[10px] md:text-[11px] text-gray-400 font-bold mt-0.5 md:mt-1">{product.weight}</p>
         </div>
 
       </div>
 
       {/* Price & Action Button Footer */}
-      <div className="mt-4 pt-3 border-t border-gray-50 flex items-center justify-between">
+      <div className="mt-2 md:mt-4 pt-1.5 md:pt-3 border-t border-gray-50 flex flex-col xs:flex-row xs:items-center justify-between gap-1">
         
         {/* Pricing Layout */}
         <div className="flex flex-col text-left">
-          <div className="flex items-baseline space-x-1">
-            <span className="text-sm sm:text-base font-black text-gray-900">₹{product.sellingPrice}</span>
+          <div className="flex items-baseline space-x-0.5 md:space-x-1">
+            <span className="text-xs xs:text-sm md:text-base font-black text-gray-900">₹{product.sellingPrice}</span>
             {product.discount > 0 && (
-              <span className="text-[10px] sm:text-xs font-semibold text-gray-400 line-through">₹{product.marketPrice}</span>
+              <span className="text-[8px] xs:text-[10px] md:text-xs font-semibold text-gray-400 line-through">₹{product.marketPrice}</span>
             )}
           </div>
           
           {/* Low Stock Status Indicator */}
           {isLowStock && (
-            <span className="text-[9px] font-black text-red-500 animate-pulse mt-0.5">
+            <span className="text-[7px] xs:text-[8px] md:text-[9px] font-black text-red-500 animate-pulse mt-0.5">
               Only {product.stock} left!
             </span>
           )}
           
           {!isOutOfStock && !isLowStock && (
-            <span className="text-[9px] font-bold text-green-600 mt-0.5">
+            <span className="text-[7px] xs:text-[8px] md:text-[9px] font-bold text-green-600 mt-0.5">
               In Stock
             </span>
           )}
         </div>
 
         {/* Add to Cart Actions */}
-        <div>
+        <div className="flex justify-end mt-0.5 xs:mt-0">
           {isOutOfStock ? (
             <button
               disabled
-              className="rounded-xl bg-gray-100 px-4 py-1.5 text-xs font-bold text-gray-400 cursor-not-allowed"
+              className="rounded-lg bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-400 cursor-not-allowed"
             >
               Sold Out
             </button>
           ) : cartQty > 0 ? (
-            <div className="flex items-center space-x-2 bg-green-500 text-white rounded-xl px-2 py-1 shadow-md shadow-green-100">
+            <div className="flex items-center space-x-1.5 xs:space-x-2 bg-green-500 text-white rounded-lg px-1.5 py-0.5 shadow-md shadow-green-100">
               <button 
                 onClick={() => onRemoveFromCart(product)}
-                className="p-1 hover:bg-white/10 rounded-lg transition"
+                className="p-0.5 hover:bg-white/10 rounded transition"
               >
-                <Minus className="h-3 w-3 font-bold" />
+                <Minus className="h-2.5 w-2.5 font-bold text-white" />
               </button>
-              <span className="text-xs font-black px-1 min-w-[14px] text-center">{cartQty}</span>
+              <span className="text-[10px] xs:text-xs font-black px-0.5 min-w-[12px] text-center">{cartQty}</span>
               <button 
                 onClick={() => onAddToCart(product)}
-                className="p-1 hover:bg-white/10 rounded-lg transition"
+                className="p-0.5 hover:bg-white/10 rounded transition"
               >
-                <Plus className="h-3 w-3 font-bold" />
+                <Plus className="h-2.5 w-2.5 font-bold text-white" />
               </button>
             </div>
           ) : (
             <button
               onClick={() => onAddToCart(product)}
-              className="rounded-xl border border-green-500 bg-white hover:bg-green-500 hover:text-white text-green-600 font-extrabold text-xs px-4 py-1.5 shadow-sm transition-all duration-200 active:scale-95"
+              className="rounded-lg border border-green-500 bg-white hover:bg-green-500 hover:text-white text-green-600 font-extrabold text-[10px] xs:text-xs px-2.5 py-1 md:px-4 md:py-1.5 shadow-xs transition-all duration-200 active:scale-95"
             >
               ADD
             </button>
