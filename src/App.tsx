@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { INITIAL_CATEGORIES, INITIAL_PRODUCTS } from "./data";
-import { Product, Category, CartItem, Address, Order, Rider } from "./types";
+import { Product, Category, CartItem, Address, Order, Rider, ComboDeal } from "./types";
 import { calculatePricing } from "./lib/pricing";
 
 // Component Imports
@@ -10,6 +10,7 @@ import Hero from "./components/Hero";
 import MobilePromoBanner from "./components/MobilePromoBanner";
 import Categories from "./components/Categories";
 import ProductCard from "./components/ProductCard";
+import PetProductRequest from "./components/PetProductRequest";
 import ProductDetailsModal from "./components/ProductDetailsModal";
 import CartDrawer from "./components/CartDrawer";
 import CheckoutModal from "./components/CheckoutModal";
@@ -18,6 +19,7 @@ import UserProfile from "./components/UserProfile";
 import AdminPanel from "./components/AdminPanel";
 import RiderDashboard from "./components/RiderDashboard";
 import LocationOnboardingModal from "./components/LocationOnboardingModal";
+import ComboCard from "./components/ComboCard";
 import { 
   syncOrderToFirebase, 
   fetchOrdersFromFirebase, 
@@ -25,19 +27,32 @@ import {
   db,
   fetchRidersFromFirebase, 
   syncRiderToFirebase, 
+  subscribeToRiders,
   fetchUserProfileFromFirebase,
   fetchSavedAddressesFromFirebase,
   saveAddressToFirebase,
   deleteAddressFromFirebase,
   setDefaultAddressInFirebase,
   syncUserProfileToFirebase,
-  clearAllAddressesFromFirebase
+  clearAllAddressesFromFirebase,
+  syncProductToFirebase,
+  deleteProductFromFirebase,
+  bootstrapProductsIfEmpty,
+  onProductsSnapshot,
+  addProduct,
+  updateProduct,
+  deleteProduct,
+  fetchProducts,
+  subscribeToProducts,
+  subscribeToCombos,
+  saveComboToFirebase,
+  deleteComboFromFirebase
 } from "./lib/firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { onSnapshot, collection, query, where } from "firebase/firestore";
 
 // Icons for general UI
-import { Sparkles, Heart, ShoppingBag, ShieldAlert, ArrowLeft, Trash2, Home, AlertCircle, RefreshCw, Star, Info, X, User } from "lucide-react";
+import { Sparkles, Heart, ShoppingBag, ShieldAlert, ArrowLeft, Trash2, Home, AlertCircle, RefreshCw, Star, Info, X, User, Gift } from "lucide-react";
 
 export default function App() {
   const navigate = useNavigate();
@@ -45,7 +60,55 @@ export default function App() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // --- Root States ---
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productsLoaded, setProductsLoaded] = useState<boolean>(false);
+  const [combos, setCombos] = useState<ComboDeal[]>([]);
+
+  // --- Real-time Inventory Coordination ---
+  useEffect(() => {
+    let unsubscribeProducts: (() => void) | null = null;
+    let unsubscribeCombos: (() => void) | null = null;
+    
+    async function initInventorySync() {
+      try {
+        console.log("[STARTUP] Loading products...");
+        console.log("[Inventory] Firestore Connected");
+        console.log("[Inventory] Real-Time Sync Active");
+        
+        // Fetch products directly as single source of truth from Firestore
+        const dbProducts = await fetchProducts();
+        console.log(`[Inventory] Product Count: ${dbProducts.length}`);
+        
+        setProducts(dbProducts);
+        setProductsLoaded(true);
+        
+        // Setup real-time Firestore sync using subscriber mapping
+        unsubscribeProducts = subscribeToProducts((updatedProductsList) => {
+          setProducts(updatedProductsList);
+          setProductsLoaded(true);
+        });
+
+        // Setup real-time combos sync
+        unsubscribeCombos = subscribeToCombos((updatedCombosList) => {
+          setCombos(updatedCombosList);
+        });
+      } catch (err) {
+        console.error("Failed to initialize Firebase inventory sync:", err);
+      }
+    }
+    
+    initInventorySync();
+    
+    return () => {
+      if (unsubscribeProducts) {
+        unsubscribeProducts();
+      }
+      if (unsubscribeCombos) {
+        unsubscribeCombos();
+      }
+    };
+  }, []);
+
   const [cart, setCart] = useState<CartItem[]>([]);
   const [wishlist, setWishlist] = useState<Product[]>([]);
   const [activeTab, setActiveTab] = useState<string>("home"); // "home" | "wishlist" | "profile" | "admin"
@@ -455,97 +518,92 @@ export default function App() {
       console.error("Failed to load persisted localStorage states", e);
     }
 
-    // Load riders from Firebase on boot
-    const loadData = async () => {
-      try {
-        const dbRiders = await fetchRidersFromFirebase();
-        if (dbRiders && dbRiders.length > 0) {
-          console.log("[SmartCart] Riders loaded from Firestore:", dbRiders);
-          setRiders(dbRiders);
-          localStorage.setItem("smartcart_riders_db", JSON.stringify(dbRiders));
-        } else {
-          // No riders in DB, seed with standard Admin-created Rider defaults
-          console.log("[SmartCart] Seeding Firestore riders table...");
-          const defaultRidersList: Rider[] = [
-            {
-              id: "rider-1",
-              name: "Ramesh Kumar",
-              phone: "+91 98315 48210",
-              email: "ramesh@smartcart.com",
-              vehicleNumber: "DL-3S-CH-0104",
-              isActiveOnDuty: true,
-              lat: 42.0,
-              lng: 64.0,
-              battery: "94%",
-              avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=150",
-              completedDeliveries: 12,
-              activeDeliveries: 0,
-              avgDeliveryTime: 14,
-              password: "111111"
-            },
-            {
-              id: "rider-2",
-              name: "Amit Sharma",
-              phone: "+91 99124 10204",
-              email: "amit@smartcart.com",
-              vehicleNumber: "HR-26-Y-2856",
-              isActiveOnDuty: true,
-              lat: 68.0,
-              lng: 32.0,
-              battery: "78%",
-              avatar: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=150",
-              completedDeliveries: 8,
-              activeDeliveries: 0,
-              avgDeliveryTime: 18,
-              password: "222222"
-            },
-            {
-              id: "rider-3",
-              name: "Sandeep Singh",
-              phone: "+91 97182 55901",
-              email: "sandeep@smartcart.com",
-              vehicleNumber: "DL-1V-AA-5291",
-              isActiveOnDuty: false,
-              lat: 50.0,
-              lng: 50.0,
-              battery: "100%",
-              avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=150",
-              completedDeliveries: 24,
-              activeDeliveries: 0,
-              avgDeliveryTime: 11,
-              password: "333333"
-            },
-            {
-              id: "rider-4",
-              name: "Vikram Rathore",
-              phone: "+91 98112 55291",
-              email: "vikram@smartcart.com",
-              vehicleNumber: "UP-16-TS-8941",
-              isActiveOnDuty: true,
-              lat: 28.0,
-              lng: 48.0,
-              battery: "82%",
-              avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=150",
-              completedDeliveries: 19,
-              activeDeliveries: 0,
-              avgDeliveryTime: 13,
-              password: "444444"
-            }
-          ];
-          const isAdminUser = auth.currentUser && auth.currentUser.email === "himanshu712007@gmail.com";
-          if (isAdminUser) {
-            for (const r of defaultRidersList) {
-              await syncRiderToFirebase(r).catch((e) => console.warn("Seed write skipped:", e));
-            }
+    // Initializing real-time Firestore tracking for riders with automatic fallback seed
+    const unsubscribeRiders = subscribeToRiders(async (ridersList) => {
+      if (ridersList && ridersList.length > 0) {
+        setRiders(ridersList);
+        localStorage.setItem("smartcart_riders_db", JSON.stringify(ridersList));
+      } else {
+        // No riders in DB, seed with standard Admin-created Rider defaults
+        console.log("[SmartCart] Seeding Firestore riders table...");
+        const defaultRidersList: Rider[] = [
+          {
+            id: "rider-1",
+            name: "Ramesh Kumar",
+            phone: "+91 98315 48210",
+            email: "ramesh@smartcart.com",
+            vehicleNumber: "DL-3S-CH-0104",
+            isActiveOnDuty: true,
+            lat: 42.0,
+            lng: 64.0,
+            battery: "94%",
+            avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=150",
+            completedDeliveries: 12,
+            activeDeliveries: 0,
+            avgDeliveryTime: 14,
+            password: "111111"
+          },
+          {
+            id: "rider-2",
+            name: "Amit Sharma",
+            phone: "+91 99124 10204",
+            email: "amit@smartcart.com",
+            vehicleNumber: "HR-26-Y-2856",
+            isActiveOnDuty: true,
+            lat: 68.0,
+            lng: 32.0,
+            battery: "78%",
+            avatar: "https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&q=80&w=150",
+            completedDeliveries: 8,
+            activeDeliveries: 0,
+            avgDeliveryTime: 18,
+            password: "222222"
+          },
+          {
+            id: "rider-3",
+            name: "Sandeep Singh",
+            phone: "+91 97182 55901",
+            email: "sandeep@smartcart.com",
+            vehicleNumber: "DL-1V-AA-5291",
+            isActiveOnDuty: false,
+            lat: 50.0,
+            lng: 50.0,
+            battery: "100%",
+            avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=150",
+            completedDeliveries: 24,
+            activeDeliveries: 0,
+            avgDeliveryTime: 11,
+            password: "333333"
+          },
+          {
+            id: "rider-4",
+            name: "Vikram Rathore",
+            phone: "+91 98112 55291",
+            email: "vikram@smartcart.com",
+            vehicleNumber: "UP-16-TS-8941",
+            isActiveOnDuty: true,
+            lat: 28.0,
+            lng: 48.0,
+            battery: "82%",
+            avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=150",
+            completedDeliveries: 19,
+            activeDeliveries: 0,
+            avgDeliveryTime: 13,
+            password: "444444"
           }
-          setRiders(defaultRidersList);
-          localStorage.setItem("smartcart_riders_db", JSON.stringify(defaultRidersList));
+        ];
+        
+        for (const r of defaultRidersList) {
+          await syncRiderToFirebase(r).catch((e) => console.warn("Seed write skipped:", e));
         }
-      } catch (err) {
-        console.error("Error loading/seeding riders from Firestore:", err);
+        setRiders(defaultRidersList);
+        localStorage.setItem("smartcart_riders_db", JSON.stringify(defaultRidersList));
       }
+    });
+
+    return () => {
+      unsubscribeRiders();
     };
-    loadData();
   }, []);
 
   // --- Dynamic Storage Key for Order Isolation ---
@@ -1342,14 +1400,36 @@ export default function App() {
       placed_at: new Date().toISOString(),
     };
 
-    // Deduct stock levels in state
+    // Deduct stock levels in state & Firestore (including items within purchased combo deals)
     const updatedProducts = products.map((prod) => {
-      const cartItem = cart.find((item) => item.product.id === prod.id);
-      if (cartItem) {
-        return {
+      // 1. Direct purchase quantity
+      const directCartItem = cart.find((item) => item.product.id === prod.id);
+      const directQty = directCartItem ? directCartItem.quantity : 0;
+
+      // 2. Combo-based purchase quantity
+      let indirectQty = 0;
+      cart.forEach((item) => {
+        if (item.product.id.startsWith("combo-")) {
+          const cb = combos.find((c) => c.id === item.product.id);
+          if (cb && cb.productIds.includes(prod.id)) {
+            indirectQty += item.quantity;
+          }
+        }
+      });
+
+      const totalDeduction = directQty + indirectQty;
+
+      if (totalDeduction > 0) {
+        const nextStock = Math.max(0, prod.stock - totalDeduction);
+        const updated = {
           ...prod,
-          stock: Math.max(0, prod.stock - cartItem.quantity),
+          stock: nextStock,
         };
+        // Update in Firestore asynchronously so it is preserved
+        updateProduct(updated).catch((err) => {
+          console.error("[SmartCart Checkout] Stock deduction error:", err);
+        });
+        return updated;
       }
       return prod;
     });
@@ -1410,25 +1490,62 @@ export default function App() {
 
   // --- Admin Portal Handlers ---
 
-  const handleAddProductAdmin = (p: Omit<Product, "id">) => {
+  const handleAddProductAdmin = async (p: Omit<Product, "id">) => {
     const fresh: Product = {
       ...p,
       id: `p-${Date.now()}`,
     };
-    setProducts([fresh, ...products]);
+    try {
+      await addProduct(fresh);
+    } catch (err) {
+      console.error("[Inventory] Error adding product to Firebase:", err);
+    }
   };
 
-  const handleDeleteProductAdmin = (id: string) => {
-    setProducts(products.filter((p) => p.id !== id));
-    // Also strip deleted product from cart and wishlist to prevent layout crashes
-    saveCart(cart.filter((item) => item.product.id !== id));
-    saveWishlist(wishlist.filter((x) => x.id !== id));
+  const handleDeleteProductAdmin = async (id: string) => {
+    try {
+      await deleteProduct(id);
+      // Also strip deleted product from cart and wishlist to prevent layout crashes
+      saveCart(cart.filter((item) => item.product.id !== id));
+      saveWishlist(wishlist.filter((x) => x.id !== id));
+    } catch (err) {
+      console.error("[Inventory] Error deleting product from Firebase:", err);
+    }
   };
 
-  const handleUpdateStockAdmin = (id: string, newStock: number) => {
-    setProducts(
-      products.map((p) => (p.id === id ? { ...p, stock: newStock } : p))
-    );
+  const handleUpdateStockAdmin = async (id: string, newStock: number) => {
+    const product = products.find((p) => p.id === id);
+    if (!product) return;
+    const updated = { ...product, stock: newStock };
+    try {
+      await updateProduct(updated);
+    } catch (err) {
+      console.error("[Inventory] Error updating product stock in Firebase:", err);
+    }
+  };
+
+  const handleUpdateProductAdmin = async (product: Product) => {
+    try {
+      await updateProduct(product);
+    } catch (err) {
+      console.error("[Inventory] Error updating product in Firebase:", err);
+    }
+  };
+
+  const handleAddComboAdmin = async (combo: ComboDeal) => {
+    try {
+      await saveComboToFirebase(combo);
+    } catch (err) {
+      console.error("[Inventory] Error adding combo to Firebase:", err);
+    }
+  };
+
+  const handleDeleteComboAdmin = async (id: string) => {
+    try {
+      await deleteComboFromFirebase(id);
+    } catch (err) {
+      console.error("[Inventory] Error deleting combo from Firebase:", err);
+    }
   };
 
   const handleUpdateOrderStatus = async (orderId: string, status: Order["status"]) => {
@@ -1754,6 +1871,42 @@ export default function App() {
     return matchesCategory && matchesSearch;
   });
 
+  const buyAgainProducts = React.useMemo(() => {
+    const currentUid = auth.currentUser?.uid;
+    if (currentUid && orders && orders.length > 0) {
+      const userOrders = orders.filter((o) => o.userId === currentUid);
+      if (userOrders.length > 0) {
+        const frequency: Record<string, { count: number; product: Product }> = {};
+        userOrders.forEach((o) => {
+          if (o.items && Array.isArray(o.items)) {
+            o.items.forEach((item) => {
+              const p = item.product;
+              if (!p || !p.id) return;
+              if (frequency[p.id]) {
+                frequency[p.id].count += item.quantity || 1;
+              } else {
+                frequency[p.id] = { count: item.quantity || 1, product: p };
+              }
+            });
+          }
+        });
+        
+        const sorted = Object.values(frequency)
+          .sort((a, b) => b.count - a.count)
+          .map((item) => item.product);
+
+        if (sorted.length > 0) {
+          return sorted;
+        }
+      }
+    }
+    
+    // Fallback: Show first 8 popular products from active catalog based on ratingCount
+    return [...products]
+      .sort((a, b) => (b.ratingCount || 0) - (a.ratingCount || 0))
+      .slice(0, 8);
+  }, [orders, products]);
+
   // Best offers subset
   const bestOffersSubset = products.filter((p) => p.isBestOffer === true).slice(0, 4);
 
@@ -1822,6 +1975,176 @@ export default function App() {
               }}
             />
 
+            {/* --- Combo Deals Section --- */}
+            {!selectedCategory && searchQuery.trim() === "" && combos.length > 0 && (
+              <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-6 mb-4 text-left" id="homepage-combo-deals">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xl md:text-2xl select-none">🔥</span>
+                    <div>
+                      <h2 className="text-base sm:text-xl font-black text-gray-955 tracking-tight leading-tight uppercase">Combo Deals</h2>
+                      <p className="text-[10px] md:text-xs text-gray-400 font-extrabold uppercase">Save flat discounts with instant food stacks</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {combos.map((combo) => {
+                    const savings = combo.originalPrice - combo.sellingPrice;
+                    return (
+                      <div key={combo.id} className="bg-gradient-to-br from-amber-50/50 to-orange-50/20 border border-orange-100 hover:border-orange-200 transition-all rounded-3xl p-4 flex flex-col justify-between shadow-xs hover:shadow-md group relative overflow-hidden" id={`combo-${combo.id}`}>
+                        {/* Visual accent badge */}
+                        <div className="absolute top-3 right-3 bg-red-500 text-white font-black text-[9px] px-2 py-1 rounded-full uppercase tracking-wider shadow-xs animate-pulse">
+                          SAVE ₹{savings}
+                        </div>
+                        
+                        <div className="flex gap-4 items-start">
+                          {/* Combo Image */}
+                          <div className="h-20 w-20 sm:h-24 sm:w-24 bg-white rounded-2xl flex items-center justify-center shrink-0 border border-orange-100/50 overflow-hidden group-hover:scale-105 transition-all">
+                            <img src={combo.image || "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=200"} alt={combo.title} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                          </div>
+                          
+                          {/* Combo Title & Specs */}
+                          <div className="flex-1 min-w-0 text-left">
+                            <span className="text-[10px] font-black text-red-650 bg-red-50/80 px-2 py-0.5 rounded uppercase tracking-wider mb-1 inline-block">
+                              {combo.badge || "Combo Deal"}
+                            </span>
+                            <h3 className="text-sm font-black text-gray-900 group-hover:text-red-100 transition truncate leading-tight">
+                              {combo.title}
+                            </h3>
+                            <p className="text-[11px] text-gray-500 font-semibold leading-normal mt-1 line-clamp-2">
+                              Combine & pack items together under instant bundle deal.
+                            </p>
+                          </div>
+                        </div>
+                        
+                        {/* Bottom pricing and Buy button */}
+                        <div className="mt-4 pt-3 border-t border-dotted border-orange-100 flex items-center justify-between">
+                          <div className="text-left">
+                            <p className="text-[9px] text-gray-400 font-bold uppercase leading-none">Combo Price</p>
+                            <div className="flex items-center space-x-1.5 mt-0.5">
+                              <span className="text-base font-black text-gray-900">₹{combo.sellingPrice}</span>
+                              <span className="text-xs font-semibold text-gray-400 line-through font-mono">₹{combo.originalPrice}</span>
+                            </div>
+                          </div>
+                          
+                          <button
+                            onClick={() => {
+                              const pseudoProduct: Product = {
+                                id: combo.id,
+                                name: combo.title,
+                                brand: "Combo Deals",
+                                category: "Combo Deals",
+                                sellingPrice: combo.sellingPrice,
+                                marketPrice: combo.originalPrice,
+                                discount: Math.round((savings / combo.originalPrice) * 100),
+                                image: combo.image,
+                                stock: 50, // virtual high stock for combo bundles
+                                available: true,
+                                rating: 5.0,
+                                ratingCount: 1,
+                                description: `Package deal containing: ${combo.title}`,
+                                weight: "1 pack",
+                                isFeatured: false,
+                                isBestOffer: false,
+                              };
+                              handleAddToCart(pseudoProduct);
+                              console.log(`[Inventory] Added Combo to Cart: ${combo.title}`);
+                            }}
+                            className="bg-red-500 hover:bg-red-650 active:scale-95 text-white font-black text-xs px-4 py-2 rounded-xl transition shadow-xs flex items-center space-x-1 cursor-pointer"
+                            id={`add-combo-to-cart-${combo.id}`}
+                          >
+                            <span>Add Combo</span>
+                            <span>+</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            {/* --- Buy Again Segment --- */}
+            {!selectedCategory && searchQuery.trim() === "" && buyAgainProducts.length > 0 && (
+              <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-6 mb-4 text-left font-sans" id="homepage-buy-again">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xl md:text-2xl select-none">🛒</span>
+                    <div>
+                      <h2 className="text-base sm:text-xl font-black text-gray-955 tracking-tight leading-tight uppercase">Buy Again</h2>
+                      <p className="text-[10px] md:text-xs text-gray-400 font-extrabold uppercase">Personalized curation from your historical purchases</p>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Horizontal Scrolling wrapper */}
+                <div className="flex space-x-4 overflow-x-auto pb-4 scrollbar-thin scrollbar-thumb-gray-200 scroll-smooth -mx-4 px-4 sm:mx-0 sm:px-0">
+                  {buyAgainProducts.map((p) => {
+                    const isInWishlist = wishlist.some((x) => x.id === p.id);
+                    return (
+                      <div
+                        key={`buy-again-${p.id}`}
+                        className="bg-white border border-gray-150 rounded-2xl p-3 shrink-0 w-[160px] sm:w-[180px] shadow-xs hover:shadow-md transition-all flex flex-col justify-between group"
+                      >
+                        {/* Upper image and metadata */}
+                        <div className="relative">
+                          <button
+                            onClick={() => handleToggleWishlist(p)}
+                            className="absolute top-1.5 right-1.5 p-1 bg-white/90 backdrop-blur-xs rounded-full shadow-xs hover:bg-white z-10 transition active:scale-90 border border-gray-100"
+                          >
+                            <span className="text-[12px] flex items-center justify-center">
+                              {isInWishlist ? "❤️" : "🤍"}
+                            </span>
+                          </button>
+                          
+                          <div
+                            onClick={() => setSelectedProduct(p)}
+                            className="h-28 w-full bg-gray-50/55 rounded-xl flex items-center justify-center overflow-hidden cursor-pointer group-hover:scale-102 transition"
+                          >
+                            <img
+                              src={p.image}
+                              alt={p.name}
+                              className="h-full w-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Title and pricing details */}
+                        <div className="mt-2 flex-1 flex flex-col justify-between">
+                          <div onClick={() => setSelectedProduct(p)} className="cursor-pointer text-left">
+                            <p className="text-[9px] text-gray-400 font-bold uppercase leading-none truncate">{p.brand}</p>
+                            <h4 className="text-xs font-black text-gray-955 mt-1 truncate group-hover:text-amber-600 transition">
+                              {p.name}
+                            </h4>
+                            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">{p.weight || "1 unit"}</p>
+                          </div>
+
+                          <div className="mt-3 pt-2 border-t border-gray-50 flex items-center justify-between">
+                            <div className="text-left">
+                              <span className="text-xs font-black text-gray-955">₹{p.sellingPrice}</span>
+                              {p.marketPrice > p.sellingPrice && (
+                                <span className="text-[9px] text-gray-400 font-bold line-through ml-1 font-mono font-sans">₹{p.marketPrice}</span>
+                              )}
+                            </div>
+
+                            <button
+                              onClick={() => handleAddToCart(p)}
+                              className="h-7 w-7 bg-green-500 hover:bg-green-655 active:scale-95 text-white font-bold rounded-lg flex items-center justify-center transition shadow-xs cursor-pointer"
+                              title="Instantly add to delivery bag"
+                            >
+                              <span className="text-sm font-black">+</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
             {/* Show Mobile Promo Banner ONLY if no category filter or search active */}
             {!selectedCategory && searchQuery.trim() === "" && (
               <MobilePromoBanner />
@@ -1852,10 +2175,110 @@ export default function App() {
             {/* Products sections */}
             <div className="mx-auto max-w-7xl px-1.5 xs:px-3 sm:px-6 lg:px-8 mt-4 md:mt-6 animate-fade-in" id="catalog-grids-section">
               
-              {/* If search/category filter is operating, just display standard catalog results */}
-              {selectedCategory || searchQuery.trim() !== "" ? (
+              {!productsLoaded ? (
+                <div className="py-20 text-center flex flex-col items-center justify-center space-y-4">
+                  <RefreshCw className="h-8 w-8 animate-spin text-orange-500" />
+                  <p className="text-sm font-semibold text-gray-500">Fast tracking fresh inventory from cloud vaults...</p>
+                </div>
+              ) : products.length === 0 ? (
+                <div className="py-20 text-center flex flex-col items-center justify-center max-w-sm mx-auto" id="empty-inventory-state">
+                  <div className="h-16 w-16 bg-gray-50 rounded-full flex items-center justify-center mb-4 border border-gray-100">
+                    <ShoppingBag className="h-8 w-8 text-gray-300" />
+                  </div>
+                  <h4 className="text-sm font-black text-gray-800 tracking-tight mb-1">No products available</h4>
+                  <p className="text-xs text-gray-400 font-semibold uppercase">The inventory is currently empty. Our administrators will list fresh grocery items shortly!</p>
+                </div>
+              ) : selectedCategory ? (
+                /* 1. SINGLE-CATEGORY PAGE VIEW (Completely isolated) */
                 <div>
-                  <h3 className="text-sm md:text-lg font-black text-gray-950 text-left mb-3 md:mb-4 tracking-tight">SearchResults ({filteredProducts.length} items found)</h3>
+                  {selectedCategory === "pet" && <PetProductRequest />}
+
+                  <div className="text-left mb-6 border-b border-gray-100 pb-4">
+                    <h3 className="text-lg sm:text-2xl font-black text-gray-955 flex items-center gap-2">
+                      {selectedCategory === "fruits" && "🍎"}
+                      {selectedCategory === "combos" && "🎁"}
+                      {selectedCategory === "vegetables" && "🥬"}
+                      {selectedCategory === "dairy" && "🥛"}
+                      {selectedCategory === "snacks" && "🍿"}
+                      {selectedCategory === "beverages" && "🥤"}
+                      {selectedCategory === "bakery" && "🥐"}
+                      {selectedCategory === "personal-care" && "🧴"}
+                      {selectedCategory === "household" && "🧹"}
+                      {selectedCategory === "frozen" && "❄️"}
+                      {selectedCategory === "baby" && "👶"}
+                      {selectedCategory === "pet" && "🐾"}
+                      <span>
+                        {INITIAL_CATEGORIES.find((c) => c.id === selectedCategory)?.name || "Category Products"}
+                      </span>
+                    </h3>
+                    <p className="text-[10px] md:text-xs text-gray-400 font-extrabold uppercase mt-1 tracking-wider">
+                      {searchQuery.trim() !== "" ? `Filtered by search: "${searchQuery}" • ` : ""}
+                      {selectedCategory === "combos" 
+                        ? `${combos.length} bundle offers available`
+                        : `${filteredProducts.length} items available in this section`
+                      }
+                    </p>
+                  </div>
+
+                  {selectedCategory === "combos" ? (
+                    combos.length === 0 ? (
+                      <div className="text-center py-16 bg-gray-50/50 border border-dashed border-gray-200 rounded-3xl p-8 max-w-md mx-auto my-8">
+                        <div className="h-12 w-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-150">
+                          <Gift className="h-6 w-6 text-gray-400" />
+                        </div>
+                        <p className="text-sm font-extrabold text-gray-800 uppercase tracking-tight">No combo deals listed yet.</p>
+                        <p className="text-xs text-gray-400 mt-1.5 font-semibold">Our network administrators will publish hot bundle offers shortly!</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {combos.map((c) => (
+                          <ComboCard
+                            key={c.id}
+                            combo={c}
+                            cartQty={cart.find((item) => item.product.id === c.id)?.quantity || 0}
+                            onAddToCart={handleAddToCart}
+                            onRemoveFromCart={handleRemoveFromCart}
+                            allProducts={products}
+                          />
+                        ))}
+                      </div>
+                    )
+                  ) : filteredProducts.length === 0 ? (
+                    <div className="text-center py-16 bg-gray-50/50 border border-dashed border-gray-200 rounded-3xl p-8 max-w-md mx-auto my-8">
+                      <div className="h-12 w-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-150">
+                        <ShoppingBag className="h-6 w-6 text-gray-400" />
+                      </div>
+                      <p className="text-sm font-extrabold text-gray-850 uppercase tracking-tight font-black">No products available in this category.</p>
+                      <p className="text-xs text-gray-400 mt-1.5 font-semibold">Our network administrators will add fresh items to our inventory shortly!</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-3 gap-1.5 xs:gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
+                        {filteredProducts.map((p) => (
+                          <ProductCard
+                            key={p.id}
+                            product={p}
+                            cartQty={cart.find((item) => item.product.id === p.id)?.quantity || 0}
+                            onAddToCart={handleAddToCart}
+                            onRemoveFromCart={handleRemoveFromCart}
+                            isWishlisted={wishlist.some((it) => it.id === p.id)}
+                            onToggleWishlist={handleToggleWishlist}
+                            onSelectProduct={(item) => setSelectedProduct(item)}
+                          />
+                        ))}
+                      </div>
+
+                      {selectedCategory === "pet" && <PetProductRequest />}
+                    </>
+                  )}
+                </div>
+              ) : searchQuery.trim() !== "" ? (
+                /* 2. SEARCH RESULTS VIEW (Only active when searching from global homepage without a category filter) */
+                <div>
+                  <h3 className="text-sm md:text-lg font-black text-gray-955 text-left mb-3 md:mb-4 tracking-tight uppercase">
+                    SearchResults ({filteredProducts.length} items found)
+                  </h3>
+                  
                   {filteredProducts.length === 0 ? (
                     <div className="text-center py-16">
                       <p className="text-xs text-gray-400 font-bold uppercase mb-1">No items match your criteria</p>
@@ -2072,6 +2495,7 @@ export default function App() {
             onCustomerLogin={handleCustomerLogin}
             onCustomerLogout={handleCustomerLogout}
             onUpdateOrderStatus={handleUpdateOrderStatus}
+            onViewPolicy={setActivePolicy}
           />
         )}
 
@@ -2098,6 +2522,7 @@ export default function App() {
             onAddProduct={handleAddProductAdmin}
             onDeleteProduct={handleDeleteProductAdmin}
             onUpdateStock={handleUpdateStockAdmin}
+            onUpdateProduct={handleUpdateProductAdmin}
             orders={orders}
             onUpdateOrderStatus={handleUpdateOrderStatus}
             onAssignPartner={handleAssignRiderPartner}
@@ -2106,6 +2531,9 @@ export default function App() {
             isCustomerLoggedIn={isCustomerLoggedIn}
             userEmail={userEmail}
             onCustomerLogout={handleCustomerLogout}
+            combos={combos}
+            onAddCombo={handleAddComboAdmin}
+            onDeleteCombo={handleDeleteComboAdmin}
           />
         ))}
 
@@ -2178,7 +2606,7 @@ export default function App() {
 
       {/* A. PRODUCT DETAILS modal */}
       <ProductDetailsModal
-        product={selectedProduct}
+        product={selectedProduct ? (products.find((prod) => prod.id === selectedProduct.id) || selectedProduct) : null}
         isOpen={selectedProduct !== null}
         onClose={() => setSelectedProduct(null)}
         cartQty={selectedProduct ? (cart.find((item) => item.product.id === selectedProduct.id)?.quantity || 0) : 0}
@@ -2304,88 +2732,180 @@ export default function App() {
 
             {/* Modal Header */}
             <div className="pb-4 border-b border-gray-100 mb-4 text-left">
-              <span className="inline-flex items-center space-x-1 rounded-full bg-orange-500/10 px-2.5 py-1 text-[10px] font-black text-orange-700 uppercase tracking-wider mb-2">
-                SmartCart Official Legal Center
+              <span className="inline-flex items-center space-x-1 rounded-full bg-green-50 px-2.5 py-1 text-[10px] font-black text-green-700 uppercase tracking-wider mb-2">
+                SmartCart Information Center
               </span>
-              <h2 className="text-xl font-black text-gray-950">
-                {activePolicy === "privacy" && "Privacy & Coordinate Security Policy"}
-                {activePolicy === "terms" && "Terms & Conditions of Fulfillment"}
-                {activePolicy === "refund" && "Refund & Delivery Cancellation Guidelines"}
+              <h2 className="text-lg sm:text-xl font-black text-gray-950">
+                {activePolicy === "privacy" && "Privacy Disclosures"}
+                {activePolicy === "terms" && "Terms & Conditions"}
+                {activePolicy === "refund" && "Cancellation & Refund Terms"}
               </h2>
-              <p className="text-[10px] text-gray-400 font-bold uppercase mt-0.5">
-                Effective Date: June 12, 2026 • Version 2.2
+              <p className="text-[10px] text-gray-400 font-bold uppercase mt-1">
+                Last Updated: {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
               </p>
             </div>
 
             {/* Modal Body */}
             <div className="flex-1 overflow-y-auto pr-1 space-y-4 text-xs text-gray-650 leading-relaxed font-medium">
               {activePolicy === "privacy" && (
-                <>
-                  <section>
-                    <h3 className="font-black text-gray-950 text-xs uppercase mb-1">1. Information We Collect</h3>
-                    <p>
-                      To deliver high-quality groceries in under 15 minutes, SmartCart collects precise GPS layout coordinates (latitude and longitude), user account profiles, shipping addresses, telephone contact numbers, and purchase transaction records.
+                <div className="space-y-3.5">
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-2">1. Information We Collect</h3>
+                    <ul className="list-disc pl-5 space-y-1 text-gray-600 font-medium">
+                      <li><strong className="text-gray-800">Name</strong> for personalized order identification and receipting.</li>
+                      <li><strong className="text-gray-800">Email Address</strong> for digital invoices and automated updates.</li>
+                      <li><strong className="text-gray-800">Phone Number</strong> for order confirmation and contact during delivery.</li>
+                      <li><strong className="text-gray-800">Delivery Address</strong> to locate your exact fulfillment doorstep.</li>
+                      <li><strong className="text-gray-800">Order History</strong> to track your past transactions and facilitate easy reordering.</li>
+                      <li><strong className="text-gray-800">Account Information</strong> to manage credentials and authentication safely.</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-2">2. How We Use Information</h3>
+                    <ul className="list-disc pl-5 space-y-1 text-gray-600 font-medium">
+                      <li>To process and compile your grocery order items efficiently.</li>
+                      <li>To coordinate and manage real-time deliveries with our local rider team.</li>
+                      <li>To resolve inquiries and provide responsive customer support.</li>
+                      <li>To send immediate notifications about your package transit milestones.</li>
+                      <li>To verify identity and ensure rigid account security against fraud.</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">3. Data Storage</h3>
+                    <p className="text-gray-600">
+                      All collected subscriber records, profile settings, and location coordinates are securely stored utilizing cloud infrastructure and industry-standard Firebase security rules to prevent unauthorized breaches.
                     </p>
-                  </section>
-                  <section>
-                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">2. How We Use Coordinate Data</h3>
-                    <p>
-                      Your real-time GPS coordinates are critical for route optimization. They allow assigned couriers to plot fast transit maps from nearest fulfillment hubs to your doorstep. Address metadata and phone numbers are securely exposed to the assigned delivery courier only for active, unfulfilled orders.
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">4. Data Sharing Policy</h3>
+                    <p className="text-gray-600">
+                      SmartCart maintains strict confidentiality standards: we <strong className="text-gray-800">do not sell or rent</strong> customer database info to third-party marketing brokers. Relevant coordinate data and phone logs are exclusively shared with assigned courier partners strictly to complete deliveries.
                     </p>
-                  </section>
-                  <section>
-                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">3. Privacy Protection & PCI-DSS Safety</h3>
-                    <p>
-                      We never trade, loan, or lease your geographical location or PII records to affiliate brokers. All customer financial details are stored under rigid security standard rules using certified PCI-DSS compliant secure vaults.
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">5. Information Security</h3>
+                    <p className="text-gray-600">
+                      We protect your database record parameters with physical, electronic, and administrative defenses. While no internet-based platform can claim 100% absolute defense, we regularly audit policies to maximize system safety.
                     </p>
-                  </section>
-                </>
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">6. User Information Rights</h3>
+                    <p className="text-gray-600">
+                      You hold full control over your private records. You may request information modification, address correction, or absolute profile deletion at any point by reaching out to our support channel at <a href="mailto:smartcart.busi@gmail.com" className="text-green-600 hover:underline font-extrabold">smartcart.busi@gmail.com</a>.
+                    </p>
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">7. Privacy Policy Updates</h3>
+                    <p className="text-gray-600">
+                      SmartCart reserves the right to revise or update this privacy notice periodically. Your ongoing subscription and platform engagement denotes complete consensus and acceptance of any dynamic policy updates.
+                    </p>
+                  </div>
+                </div>
               )}
 
               {activePolicy === "terms" && (
-                <>
-                  <section>
-                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">1. 15-Minute Delivery Promise</h3>
-                    <p>
-                      SmartCart strives to dispatch and fulfill cargo bags within approximately 15 minutes from order creation. However, the exact arrival is dependent on regional factors, atmospheric storm patterns, global shipping lockdowns, and density of active on-duty couriers.
+                <div className="space-y-3.5">
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">1. User Accounts & Safety</h3>
+                    <ul className="list-disc pl-5 space-y-1 text-gray-600 font-medium">
+                      <li>Users must furnish legitimate, updated, and highly accurate details during registration.</li>
+                      <li>You are solely responsible for securing your login parameters and preventing credential leakage.</li>
+                      <li>SmartCart reserves full authority to immediately restrict or suspend profiles suspected of fraud, platform abuse, or malicious activity.</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">2. Ordering & Pricing</h3>
+                    <ul className="list-disc pl-5 space-y-1 text-gray-600 font-medium">
+                      <li>Orders are processed dynamically and are subject to immediate regional warehouse availability.</li>
+                      <li>Menu pricing tags, discounts, and item availability can change in real time without prior notice.</li>
+                      <li>SmartCart reserves the right to void or cancel orders due to stock issues, technical pricing errors, or suspicious transactions.</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">3. Ride Cancellation Rules</h3>
+                    <p className="text-gray-600">
+                      To safeguard fleet efficiency and keep delivery times ultra-fast, orders can <strong className="text-gray-800">only be canceled prior to an active Rider partner accepting the order request</strong>. Once a rider partner commits to your dispatch, cancellations, modifications, or returns are strictly locked and non-refundable.
                     </p>
-                  </section>
-                  <section>
-                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">2. User Account Obligations</h3>
-                    <p>
-                      By accessing this service, you warrant that you are at least 18 years of age or accessing under direct guidance of legal guardians. You must supply precise, authentic phone dialer numbers and deliver coordinates to prevent order loss or delivery failures.
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">4. Delivery Expectations</h3>
+                    <ul className="list-disc pl-5 space-y-1 text-gray-600 font-medium">
+                      <li>All listed transit timers count as estimated goals rather than absolute guarantees.</li>
+                      <li>Fulfillment delays are rare but may occur due to extreme weather, traffic jams, high demand peaks, festivals, or local roadblocks.</li>
+                      <li>Customers must specify complete location pins and addresses to prevent rider route failure.</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">5. Product Presentation</h3>
+                    <p className="text-gray-600">
+                      Product thumbnails or images represent reference previews only. Actual item packages, custom brandings, or physical styles may vary locally. Accurate item reservation is only established post successful checkout.
                     </p>
-                  </section>
-                  <section>
-                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">3. Prohibited Transactions</h3>
-                    <p>
-                      Users are forbidden from spoofing geolocation coordinates, creating multiple profiles to exploit dynamic discount promo campaigns, or harassing couriers. SmartCart reserves the right to suspend or block profiles violating operational boundaries.
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4 bg-amber-50/50 border-amber-100">
+                    <h3 className="font-extrabold text-amber-900 text-sm mb-1.5">6. Cold Drink Disclaimer</h3>
+                    <p className="text-amber-800">
+                      Chilled beverages, cold desserts, and fresh dairy elements might experience standard temperature changes during active courier transits depending on current high weather indexes and delivery times.
                     </p>
-                  </section>
-                </>
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">7. Limitation of Liability</h3>
+                    <p className="text-gray-600">
+                      SmartCart's total legal accountability and fulfillment liability for any direct delivery issue, missing item, or logistic delay is <strong className="text-gray-800 border-b border-gray-300">strictly limited to the invoice value of that specific order transaction</strong>.
+                    </p>
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">8. Client Support Channels</h3>
+                    <p className="text-gray-600">
+                      If you require terms explanation, help with a ride, or account inquiries, please dispatch an email directly to our center: <a href="mailto:smartcart.busi@gmail.com" className="text-green-600 hover:underline font-extrabold">smartcart.busi@gmail.com</a>.
+                    </p>
+                  </div>
+                </div>
               )}
 
               {activePolicy === "refund" && (
-                <>
-                  <section>
-                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">1. Cancellation Window</h3>
-                    <p>
-                      Orders can be cancelled only before they are packed. Once an order is packed, dispatched, or out for delivery, cancellation is not allowed.
+                <div className="space-y-3.5">
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-2">Order Cancellation Policies</h3>
+                    <p className="text-gray-600 leading-relaxed">
+                      To maintain a super fast 10-minute grocery service, we organize a strict cancellation standard:
                     </p>
-                  </section>
-                  <section>
-                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">2. No Returns or Exchanges</h3>
-                    <p>
-                      No returns, exchanges, or refunds are provided after successful delivery. All sales are final after delivery.
+                    <ul className="list-disc pl-5 mt-2 space-y-1.5 text-gray-600 font-medium">
+                      <li>You can easily initiate order cancellations inside the application before a delivery partner has accepted the order.</li>
+                      <li>Once a rider partner is assigned and begins the pickup process, cancellations are locked and are strictly non-refundable.</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-2">Return & Refund Standards</h3>
+                    <p className="text-gray-600">
+                      Due to the fresh nature of grocery supplies, perishables, fruits, and dairy products:
                     </p>
-                  </section>
-                  <section>
-                    <h3 className="font-black text-gray-955 text-xs uppercase mb-1">3. Non-Refundable Charges</h3>
-                    <p>
-                      Delivery charges, handling charges, and platform fees are non-refundable.
+                    <ul className="list-disc pl-5 mt-2 space-y-1.5 text-gray-600 font-medium">
+                      <li>We do not accept product returns or coordinate arbitrary item swaps once the package is delivered.</li>
+                      <li>If any element is missing, incorrect, or reaches you in damaged state, report it to <span className="font-black text-gray-800">smartcart.busi@gmail.com</span> with details for custom resolution.</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-gray-50 border border-gray-150 rounded-2xl p-4">
+                    <h3 className="font-extrabold text-gray-900 text-sm mb-1.5">Non-Refundable Service Surcharges</h3>
+                    <p className="text-gray-600">
+                      Standard service fees like the Platform Surcharge, Handling Surcharge, and Delivery partner dispatch fee are entirely non-refundable once courier transit has initiated or was attempted.
                     </p>
-                  </section>
-                </>
+                  </div>
+                </div>
               )}
             </div>
 
@@ -2393,9 +2913,9 @@ export default function App() {
             <div className="pt-4 border-t border-gray-100 mt-4 flex justify-end">
               <button
                 onClick={() => setActivePolicy(null)}
-                className="px-5 py-2.5 bg-gray-900 hover:bg-gray-800 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition cursor-pointer font-sans"
+                className="px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition cursor-pointer font-sans shadow-md shadow-green-100"
               >
-                Acknowledge
+                Acknowledge & Close
               </button>
             </div>
           </div>

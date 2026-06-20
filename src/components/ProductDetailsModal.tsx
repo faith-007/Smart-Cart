@@ -287,6 +287,21 @@ export default function ProductDetailsModal({
                 </div>
               )}
 
+              {/* Cold Drink disclaimer warning */}
+              {product.category && (
+                product.category.toLowerCase().includes("cold drink") ||
+                product.category.toLowerCase().includes("soft drink") ||
+                product.category.toLowerCase().includes("beverage") ||
+                product.category.toLowerCase().includes("juice")
+              ) && (
+                <div className="mt-5 p-3.5 bg-amber-50 border border-amber-200 rounded-2xl flex items-start space-x-2 text-amber-900 shadow-sm" id="product-cold-drink-notice">
+                  <span className="text-base shrink-0 select-none">⚠️</span>
+                  <div className="text-xs font-medium leading-relaxed">
+                    <strong className="font-extrabold text-amber-950">Cold Drink Notice:</strong> Due to delivery time, weather conditions, and extreme temperatures, cold drinks may not always remain chilled upon delivery.
+                  </div>
+                </div>
+              )}
+
             </div>
 
             {/* Price section & Dual action add */}

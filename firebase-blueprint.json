@@ -227,6 +227,48 @@
         }
       },
       "required": ["id", "productId", "userId", "userName", "rating", "comment", "createdAt"]
+    },
+    "Product": {
+      "title": "Grocery Product",
+      "description": "Details of a specific inventory item in SmartCart catalog",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "brand": { "type": "string" },
+        "category": { "type": "string" },
+        "weight": { "type": "string" },
+        "marketPrice": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "discount": { "type": "number" },
+        "stock": { "type": "number" },
+        "image": { "type": "string" },
+        "description": { "type": "string" },
+        "isFeatured": { "type": "boolean" },
+        "isBestOffer": { "type": "boolean" },
+        "rating": { "type": "number" },
+        "ratingCount": { "type": "number" }
+      },
+      "required": ["id", "name", "category", "sellingPrice", "stock"]
+    },
+    "Combo": {
+      "title": "Combo Deal",
+      "description": "Details of a specific combo deal mapping multiple products into a single discount package",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "image": { "type": "string" },
+        "products": {
+          "type": "array",
+          "description": "Details of individual products included in this combo deal bundle"
+        },
+        "originalPrice": { "type": "number" },
+        "comboPrice": { "type": "number" },
+        "savings": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "products", "originalPrice", "comboPrice", "savings"]
     }
   },
   "firestore": {
@@ -249,6 +291,14 @@
     "/reviews/{reviewId}": {
       "schema": "Review",
       "description": "Collection storing customer reviews and ratings for products"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Collection storing all individual products and dynamic stock levels in inventory"
+    },
+    "/combos/{comboId}": {
+      "schema": "Combo",
+      "description": "Collection storing combo products offering bundle pricing discounts"
     }
   }
 }

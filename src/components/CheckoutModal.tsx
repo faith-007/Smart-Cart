@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, MapPin, ChevronRight, Check, Plus, ArrowLeft, ShieldCheck, Compass, Loader2 } from "lucide-react";
+import { X, MapPin, ChevronRight, Check, Plus, ArrowLeft, ShieldCheck, Compass, Loader2, AlertTriangle } from "lucide-react";
 import { Address } from "../types";
 import DeliveryMap from "./DeliveryMap";
 
@@ -49,6 +49,7 @@ export default function CheckoutModal({
   const [upiId, setUpiId] = useState("");
   const [paymentError, setPaymentError] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showCancellationPolicyConfirm, setShowCancellationPolicyConfirm] = useState(false);
 
   if (!isOpen) return null;
 
@@ -182,6 +183,11 @@ export default function CheckoutModal({
     }
 
     setPaymentError("");
+    setShowCancellationPolicyConfirm(true);
+  };
+
+  const handleConfirmFinalOrderPlacement = () => {
+    setShowCancellationPolicyConfirm(false);
     setIsProcessing(true);
 
     setTimeout(() => {
@@ -723,6 +729,51 @@ export default function CheckoutModal({
           </div>
         )}
       </div>
+
+      {/* Customer-Friendly Order Confirmation Modal */}
+      {showCancellationPolicyConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-950/60 backdrop-blur-sm animate-fade-in font-sans">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 max-w-sm w-full border border-gray-150 shadow-2xl relative overflow-hidden flex flex-col items-center">
+            
+            {/* Title */}
+            <h3 className="text-lg sm:text-xl font-black text-gray-900 tracking-tight flex items-center gap-1.5 mb-1.5">
+              🛒 Confirm Your Order
+            </h3>
+            
+            {/* Intro Message */}
+            <p className="text-xs text-gray-500 font-medium text-center">
+              Please review your order before placing it.
+            </p>
+
+            {/* Warning Section (Cancellation Rule Block) */}
+            <div className="bg-amber-50 border border-amber-200/80 rounded-2xl p-3.5 mt-4 text-left w-full">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-amber-800 font-semibold leading-relaxed">
+                  Orders can only be canceled before a delivery rider accepts them. Once a rider accepts the order, it cannot be canceled, modified, or refunded.
+                </p>
+              </div>
+            </div>
+
+            {/* Buttons */}
+            <div className="mt-5 flex gap-3 w-full">
+              <button
+                onClick={() => setShowCancellationPolicyConfirm(false)}
+                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer text-center"
+              >
+                Back
+              </button>
+              <button
+                onClick={handleConfirmFinalOrderPlacement}
+                className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 active:scale-95 text-white font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer text-center shadow-lg shadow-green-150"
+                id="accept-cancellation-policy-btn"
+              >
+                Confirm Order
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

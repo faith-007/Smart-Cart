@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, Plus, Minus, Trash2, Heart, Gift, ShoppingBag, ArrowRight, Percent, Info } from "lucide-react";
+import { X, Plus, Minus, Trash2, Heart, Gift, ShoppingBag, ArrowRight, Percent } from "lucide-react";
 import { CartItem, Product } from "../types";
 import { calculatePricing } from "../lib/pricing";
 
@@ -171,6 +171,19 @@ export default function CartDrawer({
         {cartItems.length > 0 && (
           <div className="border-t border-gray-100 bg-gray-50/70 p-4 space-y-3.5 pb-20 md:pb-4">
             
+            {/* Cold Drink Notice inside cart */}
+            {cartItems.some((item) => {
+              const cat = item.product.category?.toLowerCase() || "";
+              return cat.includes("cold drink") || cat.includes("soft drink") || cat.includes("beverage") || cat.includes("juice");
+            }) && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start space-x-2 text-amber-900 text-left" id="cart-cold-drink-notice">
+                <span className="text-sm shrink-0">⚠️</span>
+                <div className="text-[11px] font-medium leading-relaxed">
+                  <strong className="font-bold text-amber-955">Cold Drink Notice:</strong> Due to delivery time, weather conditions, and extreme temperatures, cold drinks may not always remain chilled upon delivery.
+                </div>
+              </div>
+            )}
+
             {/* Bill Summary List */}
             <div className="space-y-1.5 border-t border-gray-150 pt-3 text-xs font-medium text-gray-600">
               <div className="flex justify-between">
@@ -195,7 +208,6 @@ export default function CartDrawer({
               <div className="flex justify-between">
                 <span className="flex items-center">
                   <span>Platform Fee</span>
-                  <Info className="h-3 w-3 text-gray-400 ml-1" title="Platform support charge" />
                 </span>
                 <span className="font-extrabold text-gray-900">₹{platformFee}</span>
               </div>
@@ -203,7 +215,6 @@ export default function CartDrawer({
               <div className="flex justify-between">
                 <span className="flex items-center">
                   <span>Handling Charge</span>
-                  <Info className="h-3 w-3 text-gray-400 ml-1" title="Safety & packing charges" />
                 </span>
                 <span className="font-extrabold text-gray-900">₹{handlingCharge}</span>
               </div>

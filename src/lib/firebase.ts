@@ -10,7 +10,8 @@ import {
   orderBy,
   deleteDoc,
   where,
-  writeBatch
+  writeBatch,
+  onSnapshot
 } from "firebase/firestore";
 import { 
   getAuth, 
@@ -23,7 +24,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup
 } from "firebase/auth";
-import { Order, Rider, Address, Review } from "../types.ts";
+import { Product, Order, Rider, Address, Review, ComboDeal } from "../types.ts";
 import firebaseConfig from "../../firebase-applet-config.json";
 
 // Initialize Firebase with custom or platform configuration
@@ -31,6 +32,7 @@ export const app = initializeApp(firebaseConfig);
 export const db = (firebaseConfig as any).firestoreDatabaseId && (firebaseConfig as any).firestoreDatabaseId !== "(default)"
   ? getFirestore(app, (firebaseConfig as any).firestoreDatabaseId)
   : getFirestore(app);
+console.log("[Inventory] Firestore Connected");
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 export { signInWithPopup };
@@ -84,6 +86,9 @@ export interface UserProfileData {
   addresses: any[];
   role?: "Admin" | "Rider" | "Customer";
   riderId?: string;
+  emailVerified?: boolean;
+  phoneVerified?: boolean;
+  createdAt?: string;
 }
 
 /**
@@ -140,6 +145,36 @@ export async function fetchUserProfileFromFirebase(userId: string): Promise<User
 }
 
 /**
+ * Check if an email is already registered in profiles
+ */
+export async function checkEmailExists(email: string): Promise<boolean> {
+  try {
+    const q = query(collection(db, "profiles"), where("email", "==", email.trim().toLowerCase()));
+    const querySnapshot = await getDocs(q);
+    return !querySnapshot.empty;
+  } catch (err) {
+    console.error("[checkEmailExists] Error checking email:", err);
+    return false;
+  }
+}
+
+/**
+ * Check if a phone number is already registered in profiles
+ */
+export async function checkPhoneExists(phone: string): Promise<boolean> {
+  try {
+    const cleanedPhone = phone.replace(/\D/g, "");
+    if (!cleanedPhone) return false;
+    const q = query(collection(db, "profiles"), where("phone", "==", cleanedPhone));
+    const querySnapshot = await getDocs(q);
+    return !querySnapshot.empty;
+  } catch (err) {
+    console.error("[checkPhoneExists] Error checking phone:", err);
+    return false;
+  }
+}
+
+/**
  * Fetch all user profiles (Admin restricted, bypasses if not authorized to avoid console level rules exceptions)
  */
 export async function fetchUserProfilesFromFirebase(): Promise<UserProfileData[]> {
@@ -178,11 +213,12 @@ export async function syncRiderToFirebase(rider: Rider): Promise<{ success: bool
     const payload = {
       id: rider.id,
       name: rider.name,
+      riderName: rider.name, // Requirement 4: riderName field
       phone: rider.phone,
       email: rider.email || "",
       password: rider.password || "123456",
       vehicleNumber: rider.vehicleNumber,
-      isActiveOnDuty: rider.isActiveOnDuty,
+      isActiveOnDuty: !!rider.isActiveOnDuty,
       lat: Number(rider.lat),
       lng: Number(rider.lng),
       battery: rider.battery || "100%",
@@ -190,6 +226,7 @@ export async function syncRiderToFirebase(rider: Rider): Promise<{ success: bool
       completedDeliveries: Number(rider.completedDeliveries) || 0,
       activeDeliveries: Number(rider.activeDeliveries) || 0,
       avgDeliveryTime: Number(rider.avgDeliveryTime) || 12,
+      lastUpdated: rider.lastUpdated || new Date().toISOString(), // Requirement 4: lastUpdated field
       role: "Rider"
     };
 
@@ -230,7 +267,8 @@ export async function fetchRidersFromFirebase(): Promise<Rider[]> {
       const data = docSnapshot.data();
       fetched.push({
         id: data.id || docSnapshot.id,
-        name: data.name || "",
+        name: data.name || data.riderName || "",
+        riderName: data.riderName || data.name || "",
         phone: data.phone || "",
         email: data.email || "",
         password: data.password || "123456",
@@ -243,6 +281,7 @@ export async function fetchRidersFromFirebase(): Promise<Rider[]> {
         completedDeliveries: Number(data.completedDeliveries) || 0,
         activeDeliveries: Number(data.activeDeliveries) || 0,
         avgDeliveryTime: Number(data.avgDeliveryTime) || 12,
+        lastUpdated: data.lastUpdated || undefined,
       });
     });
     return fetched;
@@ -250,6 +289,44 @@ export async function fetchRidersFromFirebase(): Promise<Rider[]> {
     console.error("[SmartCart Firebase] Failed to fetch riders from Firestore", error);
     return [];
   }
+}
+
+/**
+ * Real-time riders subscription
+ */
+export function subscribeToRiders(onChange: (ridersList: Rider[]) => void): () => void {
+  const pathForOnSnapshot = "riders";
+  return onSnapshot(
+    collection(db, "riders"),
+    (snapshot) => {
+      const ridersList: Rider[] = [];
+      snapshot.forEach((docSnapshot) => {
+        const data = docSnapshot.data();
+        ridersList.push({
+          id: data.id || docSnapshot.id,
+          name: data.name || data.riderName || "",
+          riderName: data.riderName || data.name || "",
+          phone: data.phone || "",
+          email: data.email || "",
+          password: data.password || "123456",
+          vehicleNumber: data.vehicleNumber || "",
+          isActiveOnDuty: !!data.isActiveOnDuty,
+          lat: Number(data.lat) || 50,
+          lng: Number(data.lng) || 50,
+          battery: data.battery || "100%",
+          avatar: data.avatar || "",
+          completedDeliveries: Number(data.completedDeliveries) || 0,
+          activeDeliveries: Number(data.activeDeliveries) || 0,
+          avgDeliveryTime: Number(data.avgDeliveryTime) || 12,
+          lastUpdated: data.lastUpdated || undefined,
+        });
+      });
+      onChange(ridersList);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, pathForOnSnapshot);
+    }
+  );
 }
 
 /**
@@ -348,6 +425,7 @@ export async function syncOrderToFirebase(order: Order): Promise<{ success: bool
         accepted_at: order.accepted_at || order.deliveryPartner.accepted_at || null,
         delivery_status: order.delivery_status || order.deliveryPartner.delivery_status || order.status || null,
       } : null,
+      proofs: order.proofs || null,
     };
 
     console.log(`[SmartCart Firebase] Syncing order: ${order.id}...`, payload);
@@ -536,6 +614,7 @@ function mapDocToOrder(docSnapshot: any): Order {
     delivered_at: data.delivered_at || undefined,
     cancelled_at: data.cancelled_at || undefined,
     cancelledAt: data.cancelledAt || data.cancelled_at || undefined,
+    proofs: data.proofs || undefined,
   };
 }
 
@@ -789,6 +868,302 @@ export async function saveReviewToFirebase(review: Review): Promise<void> {
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, pathForWrite);
+  }
+}
+
+/**
+ * Custom function to check if object is brand new or existing
+ */
+async function isNewProduct(productId: string): Promise<boolean> {
+  try {
+    const docRef = doc(db, "products", productId);
+    const snap = await getDoc(docRef);
+    return !snap.exists();
+  } catch {
+    return true; // assume new on error
+  }
+}
+
+/**
+ * Sync Product to Firestore products/{productId}
+ */
+export async function syncProductToFirebase(product: Product): Promise<{ success: boolean; error?: string }> {
+  const pathForWrite = `products/${product.id}`;
+  try {
+    const isNew = await isNewProduct(product.id);
+    const nowStr = new Date().toISOString();
+    
+    // Build payload using both user-specified strict fields and UI-compatible ones
+    const payload = {
+      id: product.id,
+      name: product.name,
+      brand: product.brand || "",
+      category: product.category,
+      weight: product.weight || "",
+      stock: Number(product.stock || 0),
+      image: product.image || "",
+      description: product.description || "",
+      
+      // Strict required system fields
+      price: Number(product.price !== undefined ? product.price : (product.sellingPrice || 0)),
+      mrp: Number(product.mrp !== undefined ? product.mrp : (product.marketPrice || 0)),
+      available: Number(product.stock || 0) > 0,
+      createdAt: product.createdAt || nowStr,
+      updatedAt: nowStr,
+
+      // UI-compatible backwards compatibility fields
+      marketPrice: Number(product.marketPrice !== undefined ? product.marketPrice : (product.mrp || 0)),
+      sellingPrice: Number(product.sellingPrice !== undefined ? product.sellingPrice : (product.price || 0)),
+      discount: Number(product.discount || 0),
+      isFeatured: !!product.isFeatured,
+      isBestOffer: !!product.isBestOffer,
+      rating: Number(product.rating || 4.5),
+      ratingCount: Number(product.ratingCount || 0),
+      ingredients: product.ingredients || "",
+      ...(product.nutrition ? { nutrition: product.nutrition } : {})
+    };
+
+    const productRef = doc(db, "products", product.id);
+    await setDoc(productRef, removeUndefined(payload));
+    
+    // Strict phase/operation logging
+    if (isNew) {
+      console.log("[Inventory] Product Added");
+      console.log("[Inventory] Product Added To Firestore");
+      console.log(`[Inventory] Saved product: ${product.name}`);
+    } else {
+      console.log("[Inventory] Product Updated");
+      console.log("[Inventory] Product Updated In Firestore");
+      console.log(`[Inventory] Updated product: ${product.name}`);
+    }
+
+    return { success: true };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, pathForWrite);
+  }
+}
+
+/**
+ * Delete Product from Firestore
+ */
+export async function deleteProductFromFirebase(productId: string): Promise<{ success: boolean; error?: string }> {
+  const pathForDelete = `products/${productId}`;
+  try {
+    const productRef = doc(db, "products", productId);
+    await deleteDoc(productRef);
+    console.log("[Inventory] Product Deleted");
+    console.log("[Inventory] Product Deleted From Firestore");
+    console.log(`[Inventory] Deleted product ID: ${productId}`);
+    return { success: true };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, pathForDelete);
+  }
+}
+
+/**
+ * Fetch all products from Firestore
+ */
+export async function fetchProductsFromFirebase(): Promise<Product[]> {
+  const pathForList = "products";
+  try {
+    const q = query(collection(db, "products"));
+    const querySnapshot = await getDocs(q);
+    const productsList: Product[] = [];
+    querySnapshot.forEach((docSnapshot) => {
+      const data = docSnapshot.data();
+      productsList.push({
+        id: data.id || docSnapshot.id,
+        name: data.name || "",
+        category: data.category || "",
+        description: data.description || "",
+        image: data.image || "",
+        price: Number(data.price !== undefined ? data.price : (data.sellingPrice || 0)),
+        mrp: Number(data.mrp !== undefined ? data.mrp : (data.marketPrice || 0)),
+        stock: Number(data.stock) || 0,
+        available: data.available !== undefined ? data.available : (Number(data.stock) > 0),
+        createdAt: data.createdAt || "",
+        updatedAt: data.updatedAt || "",
+
+        // UI-compatible backwards compatibility fields
+        brand: data.brand || "",
+        weight: data.weight || "",
+        marketPrice: Number(data.marketPrice !== undefined ? data.marketPrice : (data.mrp || 0)),
+        sellingPrice: Number(data.sellingPrice !== undefined ? data.sellingPrice : (data.price || 0)),
+        discount: Number(data.discount) || 0,
+        isFeatured: !!data.isFeatured,
+        isBestOffer: !!data.isBestOffer,
+        rating: Number(data.rating) || 4.5,
+        ratingCount: Number(data.ratingCount) || 0,
+        ingredients: data.ingredients || "",
+        nutrition: data.nutrition || undefined,
+      });
+    });
+    console.log(`[Inventory] Product Count: ${productsList.length}`);
+    console.log(`[Inventory] Product loaded from Firestore (Count: ${productsList.length})`);
+    return productsList;
+  } catch (error) {
+    console.error("[SmartCart Firebase] Failed to fetch products from Firestore", error);
+    return [];
+  }
+}
+
+/**
+ * Bootstrap products table if empty (Returns empty list, does not seed default items)
+ */
+export async function bootstrapProductsIfEmpty(initialProducts: Product[]): Promise<Product[]> {
+  console.log("[SmartCart Firebase] Bootstrapping bypass active. No demo products are automatically seeded.");
+  return [];
+}
+
+/**
+ * Real-time products sync
+ */
+export function onProductsSnapshot(onChange: (productsList: Product[]) => void): () => void {
+  const pathForOnSnapshot = "products";
+  console.log("[Inventory] Real-Time Sync Active");
+  return onSnapshot(
+    collection(db, "products"),
+    (snapshot) => {
+      const productsList: Product[] = [];
+      snapshot.forEach((docSnapshot) => {
+        const data = docSnapshot.data();
+        productsList.push({
+          id: data.id || docSnapshot.id,
+          name: data.name || "",
+          category: data.category || "",
+          description: data.description || "",
+          image: data.image || "",
+          price: Number(data.price !== undefined ? data.price : (data.sellingPrice || 0)),
+          mrp: Number(data.mrp !== undefined ? data.mrp : (data.marketPrice || 0)),
+          stock: Number(data.stock) || 0,
+          available: data.available !== undefined ? data.available : (Number(data.stock) > 0),
+          createdAt: data.createdAt || "",
+          updatedAt: data.updatedAt || "",
+
+          // UI-compatible backwards compatibility fields
+          brand: data.brand || "",
+          weight: data.weight || "",
+          marketPrice: Number(data.marketPrice !== undefined ? data.marketPrice : (data.mrp || 0)),
+          sellingPrice: Number(data.sellingPrice !== undefined ? data.sellingPrice : (data.price || 0)),
+          discount: Number(data.discount) || 0,
+          isFeatured: !!data.isFeatured,
+          isBestOffer: !!data.isBestOffer,
+          rating: Number(data.rating) || 4.5,
+          ratingCount: Number(data.ratingCount) || 0,
+          ingredients: data.ingredients || "",
+          nutrition: data.nutrition || undefined,
+        });
+      });
+      console.log(`[Inventory] Product Count: ${productsList.length}`);
+      console.log(`[Inventory] Product loaded from Firestore (Real-time snapshot, Count: ${productsList.length})`);
+      onChange(productsList);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, pathForOnSnapshot);
+    }
+  );
+}
+
+// --- Specific exact API naming mappings ---
+
+export async function addProduct(product: Product): Promise<{ success: boolean; error?: string }> {
+  return syncProductToFirebase(product);
+}
+
+export async function updateProduct(product: Product): Promise<{ success: boolean; error?: string }> {
+  return syncProductToFirebase(product);
+}
+
+export async function deleteProduct(productId: string): Promise<{ success: boolean; error?: string }> {
+  return deleteProductFromFirebase(productId);
+}
+
+export async function fetchProducts(): Promise<Product[]> {
+  return fetchProductsFromFirebase();
+}
+
+export function subscribeToProducts(onChange: (productsList: Product[]) => void): () => void {
+  return onProductsSnapshot(onChange);
+}
+
+export function subscribeToCombos(onChange: (combosList: ComboDeal[]) => void): () => void {
+  return onSnapshot(
+    collection(db, "combos"),
+    (snapshot) => {
+      const combosList: ComboDeal[] = [];
+      snapshot.forEach((docSnapshot) => {
+        const data = docSnapshot.data();
+        const originalPrice = Number(data.originalPrice) || 0;
+        const comboPrice = Number(data.comboPrice ?? data.sellingPrice) || 0;
+        const savings = Number(data.savings ?? (originalPrice - comboPrice)) || 0;
+        const displayName = data.name || data.title || "";
+        combosList.push({
+          id: data.id || docSnapshot.id,
+          title: displayName,
+          name: displayName,
+          productIds: data.productIds || [],
+          products: data.products || [],
+          originalPrice: originalPrice,
+          comboPrice: comboPrice,
+          sellingPrice: comboPrice,
+          savings: savings,
+          image: data.image || "",
+          badge: data.badge || `SAVE ₹${savings}`,
+          description: data.description || "",
+          createdAt: data.createdAt || "",
+        });
+      });
+      console.log(`[Inventory] Combo Count: ${combosList.length}`);
+      onChange(combosList);
+    },
+    (error) => {
+      console.error("[Inventory] Failed to subscribe to combos:", error);
+    }
+  );
+}
+
+export async function saveComboToFirebase(combo: ComboDeal): Promise<{ success: boolean; error?: string }> {
+  try {
+    const comboRef = doc(db, "combos", combo.id);
+    const origPrice = Number(combo.originalPrice) || 0;
+    const cPrice = Number(combo.comboPrice ?? combo.sellingPrice) || 0;
+    const saveAmt = Number(combo.savings ?? (origPrice - cPrice)) || 0;
+    const displayName = combo.name || combo.title || "";
+    
+    const payload = {
+      id: combo.id,
+      name: displayName,
+      title: displayName,
+      image: combo.image,
+      products: combo.products || [],
+      productIds: combo.productIds || [],
+      originalPrice: origPrice,
+      comboPrice: cPrice,
+      sellingPrice: cPrice,
+      savings: saveAmt,
+      badge: combo.badge || `SAVE ₹${saveAmt}`,
+      description: combo.description || "",
+      createdAt: combo.createdAt || new Date().toISOString()
+    };
+    
+    await setDoc(comboRef, payload);
+    console.log("[Inventory] Combo Added / Updated");
+    return { success: true };
+  } catch (error: any) {
+    console.error("[Inventory] Failed to save combo:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function deleteComboFromFirebase(comboId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const comboRef = doc(db, "combos", comboId);
+    await deleteDoc(comboRef);
+    console.log("[Inventory] Combo Deleted");
+    return { success: true };
+  } catch (error: any) {
+    console.error("[Inventory] Failed to delete combo:", error);
+    return { success: false, error: error.message };
   }
 }
 

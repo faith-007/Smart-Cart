@@ -37,7 +37,9 @@ import {
   fetchUserProfilesFromFirebase, 
   fetchRidersFromFirebase,
   fetchSavedAddressesFromFirebase,
-  auth
+  auth,
+  checkEmailExists,
+  checkPhoneExists
 } from "../lib/firebase";
 import { 
   signInWithEmailAndPassword, 
@@ -68,6 +70,7 @@ interface UserProfileProps {
   onCustomerLogout: () => void;
   onUpdateOrderStatus?: (orderId: string, status: Order["status"]) => void;
   onResetAddresses?: () => void;
+  onViewPolicy?: (policy: "privacy" | "terms" | "refund") => void;
 }
 
 export default function UserProfile({
@@ -92,6 +95,7 @@ export default function UserProfile({
   onCustomerLogin,
   onCustomerLogout,
   onUpdateOrderStatus,
+  onViewPolicy,
 }: UserProfileProps) {
   const currentUserId = auth.currentUser?.uid;
   const orders = React.useMemo(() => {
@@ -546,6 +550,13 @@ export default function UserProfile({
         const user = cred.user;
         
         let profile = await fetchUserProfileFromFirebase(user.uid);
+        if (profile && profile.emailVerified === false) {
+          setLoginError("Please verify your email before logging in.");
+          setAuthLoading(false);
+          await signOut(auth);
+          return;
+        }
+
         if (!profile) {
           let determinedRole: "Admin" | "Rider" | "Customer" = "Customer";
           if (email === "himanshu712007@gmail.com") {
@@ -659,8 +670,8 @@ export default function UserProfile({
     const password = passwordInput;
 
     // Direct registration parameter validations
-    if (!formattedPhone || formattedPhone.length !== 10) {
-      setLoginError("Please enter a valid 10-digit mobile number.");
+    if (formattedPhone.length !== 10 || !/^[6-9]/.test(formattedPhone)) {
+      setLoginError("Please enter a valid Indian mobile number.");
       return;
     }
 
@@ -679,20 +690,38 @@ export default function UserProfile({
       return;
     }
 
-    // Step 1: Dispatch secure 6-digit OTP to user's email
+    // Step 1: Dispatch secure 6-digit OTP to user's email only after verifying uniqueness
     if (!otpSent) {
       setAuthLoading(true);
       setLoginError("");
       setLoginSuccess("");
       setOtpAttempts(0); // Reset verification attempts counter on click create account
 
-      const generatedCode = String(Math.floor(100000 + Math.random() * 900000));
-      setSimulatedOtp(generatedCode);
-      const expires = Date.now() + 10 * 60 * 1000; // 10 minutes expiration
-      setOtpExpiresAt(expires);
-      setResendCooldown(30); // 30s resend cooldown
-
       try {
+        // Query Firebase before account creation
+        const [emailExists, phoneExists] = await Promise.all([
+          checkEmailExists(email),
+          checkPhoneExists(formattedPhone)
+        ]);
+
+        if (emailExists) {
+          setLoginError("This email address is already registered.");
+          setAuthLoading(false);
+          return;
+        }
+
+        if (phoneExists) {
+          setLoginError("This phone number is already registered.");
+          setAuthLoading(false);
+          return;
+        }
+
+        const generatedCode = String(Math.floor(100000 + Math.random() * 900000));
+        setSimulatedOtp(generatedCode);
+        const expires = Date.now() + 10 * 60 * 1000; // 10 minutes expiration
+        setOtpExpiresAt(expires);
+        setResendCooldown(30); // 30s resend cooldown
+
         console.log(`[SmartCart Auth] Dispatching secure SMTP verification code to ${email}...`);
         const response = await fetch("/api/send-otp", {
           method: "POST",
@@ -707,7 +736,7 @@ export default function UserProfile({
         } else {
           setLoginError(`Email sending failed. Please check your SMTP configuration: ${data.details || data.error}`);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.warn("[SmartCart Auth] Dispatch request failed:", err);
         setLoginError("Email sending failed. Connection error or missing SMTP setup on the server.");
       } finally {
@@ -723,18 +752,14 @@ export default function UserProfile({
     }
 
     if (otpAttempts >= 3) {
-      setLoginError("Maximum 3 verification attempts exceeded. Please click 'Resend OTP' to request a new code.");
+      setLoginError("Please verify your email before creating an account.");
       return;
     }
 
     if (otpInput !== simulatedOtp) {
       const nextAttempts = otpAttempts + 1;
       setOtpAttempts(nextAttempts);
-      if (nextAttempts >= 3) {
-        setLoginError("Invalid OTP. Maximum 3 verification attempts exceeded. Please resend a new OTP.");
-      } else {
-        setLoginError(`Invalid OTP. You have ${3 - nextAttempts} attempts remaining.`);
-      }
+      setLoginError("Please verify your email before creating an account.");
       return;
     }
 
@@ -764,10 +789,13 @@ export default function UserProfile({
         name: nameInput.trim(),
         email: email,
         phone: formattedPhone,
-        addresses: [],
+        emailVerified: true,
+        phoneVerified: false,
+        createdAt: new Date().toISOString(),
         created_at: new Date().toISOString(),
         last_login: new Date().toISOString(),
         role: (isRegisteredAdmin ? "Admin" : "Customer") as "Admin" | "Customer",
+        addresses: [],
       };
 
       await syncUserProfileToFirebase(profile);
@@ -1954,6 +1982,40 @@ export default function UserProfile({
                       {t("Update Password")}
                     </button>
                   </form>
+
+                  {/* legal & policies */}
+                  {onViewPolicy && (
+                    <div className="border-t border-gray-100 pt-5 space-y-3">
+                      <h4 className="text-xs font-black text-gray-700 uppercase tracking-wide">Legal & Policies</h4>
+                      <p className="text-[10px] text-gray-400 mt-0.5 font-semibold">Read our official customer terms and privacy disclosures</p>
+                      <div className="grid grid-cols-1 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onViewPolicy("terms")}
+                          className="flex items-center justify-between p-3 border border-gray-150 rounded-2xl hover:bg-gray-50 transition cursor-pointer text-xs font-extrabold text-gray-800"
+                        >
+                          <span>Terms & Conditions</span>
+                          <span className="text-gray-400 font-bold">&rarr;</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onViewPolicy("privacy")}
+                          className="flex items-center justify-between p-3 border border-gray-150 rounded-2xl hover:bg-gray-50 transition cursor-pointer text-xs font-extrabold text-gray-800"
+                        >
+                          <span>Privacy Policy</span>
+                          <span className="text-gray-400 font-bold">&rarr;</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onViewPolicy("refund")}
+                          className="flex items-center justify-between p-3 border border-gray-150 rounded-2xl hover:bg-gray-50 transition cursor-pointer text-xs font-extrabold text-gray-800"
+                        >
+                          <span>Refund & Cancellation Policy</span>
+                          <span className="text-gray-400 font-bold">&rarr;</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                 </div>
               </div>

@@ -87,11 +87,29 @@ service cloud.firestore {
           && data.orderId is string && data.orderId.size() <= 128;
     }
 
+    function isValidProduct(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.name is string && data.name.size() <= 300
+          && data.category is string && data.category.size() <= 100
+          && data.sellingPrice is number && data.sellingPrice >= 0
+          && data.stock is number && data.stock >= 0;
+    }
+
+    function isValidCombo(data) {
+      return data.id is string && data.id.size() <= 128
+          && data.name is string && data.name.size() <= 300
+          && data.originalPrice is number && data.originalPrice >= 0
+          && data.comboPrice is number && data.comboPrice >= 0
+          && data.savings is number
+          && data.products is list;
+    }
+
     // --- COLLECTION RULES MATCHERS ---
 
     // 1. User profile collection
     match /profiles/{userId} {
-      allow read, write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow read: if true;
+      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
     }
 
     // 2. Orders collection
@@ -156,6 +174,18 @@ service cloud.firestore {
         && request.resource.data.orderId == resource.data.orderId
         && isValidReview(request.resource.data);
       allow delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // 7. Products collection
+    match /products/{productId} {
+      allow read, write: if true;
+    }
+
+    // 8. Combo deals collection
+    match /combos/{comboId} {
+      allow read: if true;
+      allow create, update: if isAdmin() && isValidCombo(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }

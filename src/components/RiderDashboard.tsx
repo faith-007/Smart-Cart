@@ -22,7 +22,7 @@ import {
   AlertCircle
 } from "lucide-react";
 import { Rider, Order } from "../types.ts";
-import { auth, fetchOrdersFromFirebase, syncRiderToFirebase } from "../lib/firebase";
+import { auth, fetchOrdersFromFirebase, syncRiderToFirebase, syncOrderToFirebase } from "../lib/firebase";
 import { motion } from "motion/react";
 import RiderAvatar from "./RiderAvatar.tsx";
 
@@ -487,6 +487,48 @@ export default function RiderDashboard({
     setNotification(`🚨 Order #${orderId} has been rejected & cancelled.`);
   };
 
+  const handleUploadPhotoProof = async (orderId: string, proofType: "packed" | "delivered", file: File) => {
+    if (file.size > 2 * 1024 * 1024) {
+      setNotification("⚠️ Photo size too large! Please choose a photo under 2MB.");
+      return;
+    }
+
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = (error) => reject(error);
+      });
+      reader.readAsDataURL(file);
+      const base64Str = await base64Promise;
+
+      const targetOrder = orders.find((o) => o.id === orderId);
+      if (!targetOrder) return;
+
+      const currentProofs = targetOrder.proofs || {};
+      const updatedProofs = {
+        ...currentProofs,
+        uploadedAt: new Date().toISOString(),
+        ...(proofType === "packed" ? { packedPhoto: base64Str } : { deliveredPhoto: base64Str })
+      };
+
+      const updatedOrder: Order = {
+        ...targetOrder,
+        proofs: updatedProofs,
+      };
+
+      const res = await syncOrderToFirebase(updatedOrder);
+      if (res.success) {
+        setNotification(`📸 Order #${orderId} ${proofType === "packed" ? "Packing" : "Delivery"} photo proof uploaded successfully!`);
+      } else {
+        setNotification(`❌ Upload failed: ${res.error}`);
+      }
+    } catch (err: any) {
+      console.error("[RiderDashboard] Photo read error:", err);
+      setNotification(`❌ Upload error: ${err.message || err}`);
+    }
+  };
+
   // Start simulated delivery journey action
   const handleStartDelivery = (orderId: string) => {
     onUpdateOrderStatus(orderId, "out_for_delivery");
@@ -758,6 +800,24 @@ export default function RiderDashboard({
   return (
     <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8 py-6 text-left" id="rider-authorized-dashboard">
       
+      {/* Permanent, Sticky, Mobile Friendly Operational Instructions Banner */}
+      <div className="bg-gradient-to-r from-slate-900 to-indigo-950 border border-slate-850 text-white rounded-3xl p-5 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl" id="rider-operational-banner">
+        <div className="flex gap-3 text-left">
+          <div className="h-10 w-10 bg-orange-500/10 border border-orange-500/20 rounded-xl flex items-center justify-center shrink-0 text-orange-400">
+            <ShieldAlert className="h-5 w-5 animate-pulse" />
+          </div>
+          <div>
+            <span className="text-[9px] bg-orange-500 text-white font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider mb-1 inline-block">
+              Operational Instructions
+            </span>
+            <h3 className="text-sm font-black tracking-tight text-white uppercase">Critical Dispatch Guidelines</h3>
+            <p className="text-[11px] text-slate-350 leading-relaxed font-semibold mt-1">
+              ⚠️ MUST clock-in "On Duty" to capture incoming dispatches. Inspect packing items meticulously, click pictures where requested for quality control, and consult offline route maps on your vehicle interface for fast handovers!
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Real-Time Notification Toast */}
       {notification && (
         <motion.div
@@ -1014,6 +1074,89 @@ export default function RiderDashboard({
                           </div>
                         </div>
 
+                        {/* Interactive Photo Proofs upload widgets */}
+                        <div className="mt-3 bg-slate-50 border border-slate-100 rounded-2xl p-4.5 space-y-4 text-left">
+                          <h5 className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Quality Assurance Proofs</h5>
+                          
+                          {/* 1. Packing Proof */}
+                          {(order.status === "accepted" || order.status === "confirmed" || order.proofs?.packedPhoto) && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black text-slate-700 uppercase">1. Packing Proof Upload</span>
+                                {order.proofs?.packedPhoto ? (
+                                  <span className="text-[9px] bg-green-100 text-green-750 border border-green-200 font-extrabold px-2 py-0.5 rounded-full uppercase tracking-widest flex items-center gap-1">
+                                    <Check className="h-2.5 w-2.5" /> Checked & Loaded
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] bg-amber-105 bg-amber-100 text-amber-700 border border-amber-200 font-extrabold px-2 py-0.5 rounded-full uppercase tracking-widest flex items-center gap-1 animate-pulse">
+                                    ⚠️ Required
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {order.proofs?.packedPhoto ? (
+                                <div className="relative h-20 w-fit rounded-lg overflow-hidden border border-gray-150 bg-white p-1">
+                                  <img src={order.proofs.packedPhoto} className="h-full object-cover rounded-lg" alt="Packed proof" />
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-50/50 p-3 rounded-2xl transition cursor-pointer text-center relative group">
+                                  <input 
+                                    type="file" 
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) handleUploadPhotoProof(order.id, "packed", file);
+                                    }}
+                                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10" 
+                                  />
+                                  <span className="text-lg">📦</span>
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase mt-1">Select/Snap Packing Proof</span>
+                                  <span className="text-[8px] text-slate-400 uppercase font-semibold mt-0.5">Drag - Drop or Click (under 2MB)</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* 2. Delivery Proof */}
+                          {(order.status === "out_for_delivery" || order.proofs?.deliveredPhoto) && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black text-slate-700 uppercase">2. Delivery Handover Proof</span>
+                                {order.proofs?.deliveredPhoto ? (
+                                  <span className="text-[9px] bg-green-105 bg-green-100 text-green-750 border border-green-200 font-extrabold px-2 py-0.5 rounded-full uppercase tracking-widest flex items-center gap-1">
+                                    <Check className="h-2.5 w-2.5" /> Dispatched Proof
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] bg-amber-105 bg-amber-100 text-amber-700 border border-amber-200 font-extrabold px-2 py-0.5 rounded-full uppercase tracking-widest flex items-center gap-1 animate-pulse">
+                                    ⚠️ Required
+                                  </span>
+                                )}
+                              </div>
+                              
+                              {order.proofs?.deliveredPhoto ? (
+                                <div className="relative h-20 w-fit rounded-lg overflow-hidden border border-gray-150 bg-white p-1">
+                                  <img src={order.proofs.deliveredPhoto} className="h-full object-cover rounded-lg" alt="Delivered proof" />
+                                </div>
+                              ) : (
+                                <div className="flex flex-col items-center justify-center border-2 border-dashed border-slate-300 hover:border-slate-400 bg-white hover:bg-slate-55 hover:bg-slate-50/50 p-3 rounded-2xl transition cursor-pointer text-center relative group">
+                                  <input 
+                                    type="file" 
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) handleUploadPhotoProof(order.id, "delivered", file);
+                                    }}
+                                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full z-10" 
+                                  />
+                                  <span className="text-lg">📸</span>
+                                  <span className="text-[10px] font-bold text-slate-500 uppercase mt-1">Select/Snap Handover Proof</span>
+                                  <span className="text-[8px] text-slate-400 uppercase font-semibold mt-0.5">Drag - Drop or Click (under 2MB)</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
                         {/* Status Selection Dropdown */}
                         <div className="space-y-4 mt-4 pt-4 border-t border-gray-100 text-left">
                           <div>
@@ -1024,11 +1167,21 @@ export default function RiderDashboard({
                                 onChange={(e) => {
                                   const val = e.target.value as Order["status"];
                                   if (val === "packed") {
+                                    if (!order.proofs?.packedPhoto) {
+                                      alert("⚠️ Action Blocked: You must upload packing proof photo first!");
+                                      setNotification("⚠️ Action Blocked: Please upload a Packing Photo first.");
+                                      return;
+                                    }
                                     onUpdateOrderStatus(order.id, "packed");
                                     setNotification(`Order #${order.id} marked as Packed.`);
                                   } else if (val === "out_for_delivery") {
                                     handleStartDelivery(order.id);
                                   } else if (val === "delivered") {
+                                    if (!order.proofs?.deliveredPhoto) {
+                                      alert("⚠️ Action Blocked: You must upload delivery proof photo first!");
+                                      setNotification("⚠️ Action Blocked: Please upload a Delivery Handoff Photo first.");
+                                      return;
+                                    }
                                     handleCompleteDelivery(order.id);
                                   } else if (val === "accepted" || val === "confirmed") {
                                     onUpdateOrderStatus(order.id, "accepted");

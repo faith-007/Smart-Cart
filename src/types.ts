@@ -21,6 +21,13 @@ export interface Product {
   isBestOffer: boolean;
   rating: number;
   ratingCount: number;
+  
+  // Strict Firestore-only product system fields
+  price?: number;
+  mrp?: number;
+  available?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Category {
@@ -71,6 +78,8 @@ export interface Rider {
   completedDeliveries: number;
   activeDeliveries: number;
   avgDeliveryTime: number; // In minutes
+  lastUpdated?: string;
+  riderName?: string;
 }
 
 export interface DeliveryPartner {
@@ -106,6 +115,11 @@ export interface Order {
   deliveryPartner?: DeliveryPartner;
   deliveryInstructions?: string;
   rejectedByRiders?: string[]; // list of rider IDs who rejected this order
+  proofs?: {
+    packedPhoto?: string;
+    deliveredPhoto?: string;
+    uploadedAt?: string;
+  };
   rider_id?: string;
   rider_name?: string;
   assigned_at?: string;
@@ -127,12 +141,18 @@ export interface Order {
 
 export interface ComboDeal {
   id: string;
-  title: string;
+  title: string; // compatibility mapping
+  name?: string; // firebase name
   productIds: string[];
+  products?: Product[]; // included products objects
   originalPrice: number;
-  sellingPrice: number;
+  sellingPrice: number; // compatibility mapping
+  comboPrice?: number; // firebase comboPrice
+  savings?: number; // firebase savings amount
   image: string;
   badge: string;
+  description?: string;
+  createdAt?: string;
 }
 
 export interface Review {
