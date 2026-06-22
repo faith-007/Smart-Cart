@@ -11,7 +11,9 @@ import {
   deleteDoc,
   where,
   writeBatch,
-  onSnapshot
+  onSnapshot,
+  increment,
+  updateDoc
 } from "firebase/firestore";
 import { 
   getAuth, 
@@ -376,6 +378,31 @@ export function removeUndefined(obj: any): any {
  * Sync Order to Firestore
  */
 export async function syncOrderToFirebase(order: Order): Promise<{ success: boolean; error?: string }> {
+  // Validate Operating Hours (8:00 AM to 9:00 PM IST)
+  const now = new Date();
+  const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const istTime = new Date(utcTime + (5.5 * 3600000));
+  const hours = istTime.getHours();
+  const minutes = istTime.getMinutes();
+  const totalMinutes = hours * 60 + minutes;
+  const isCurrentlyOpen = totalMinutes >= 8 * 60 && totalMinutes < 21 * 60;
+  if (!isCurrentlyOpen) {
+    console.warn(`[syncOrderToFirebase] Blocked order creation backend check. Store is currently closed.`);
+    return { success: false, error: "Store Currently Closed: Orders can only be placed between 8:00 AM – 9:00 PM" };
+  }
+
+  // Validate Coords serviceability (3 KM limit from store location by default)
+  const settings = await fetchDeliveryZoneSettings();
+  const orderLat = typeof order.lat === "number" ? order.lat : order.address?.lat;
+  const orderLng = typeof order.lng === "number" ? order.lng : order.address?.lng;
+  if (typeof orderLat === "number" && typeof orderLng === "number") {
+    const distance = calculateDistance(orderLat, orderLng, settings.storeLat, settings.storeLng);
+    if (distance > settings.deliveryRadius) {
+      console.warn(`[syncOrderToFirebase] Blocked order creation. Distance is ${distance.toFixed(2)} KM, which exceeds ${settings.deliveryRadius} KM.`);
+      return { success: false, error: `Service Not Available: Delivery is only available within ${settings.deliveryRadius} KM of our store location.` };
+    }
+  }
+
   const currentUser = auth.currentUser;
   if (!currentUser) {
     console.log("[SmartCart Firebase] Guest/simulated user session. Skipping Firestore document write.");
@@ -624,6 +651,7 @@ function mapDocToOrder(docSnapshot: any): Order {
 export async function fetchSavedAddressesFromFirebase(userId: string): Promise<Address[]> {
   const pathForList = `users/${userId}/addresses`;
   try {
+    const settings = await fetchDeliveryZoneSettings();
     const addressesRef = collection(db, "users", userId, "addresses");
     const qSnapshot = await getDocs(addressesRef);
     const addresses: Address[] = [];
@@ -652,6 +680,11 @@ export async function fetchSavedAddressesFromFirebase(userId: string): Promise<A
         lat: typeof data.lat === "number" ? data.lat : undefined,
         lng: typeof data.lng === "number" ? data.lng : undefined,
         gpsAccuracy: typeof data.gpsAccuracy === "number" ? data.gpsAccuracy : undefined,
+        serviceable: typeof data.serviceable === "boolean" 
+          ? data.serviceable 
+          : (typeof data.lat === "number" && typeof data.lng === "number"
+             ? calculateDistance(data.lat, data.lng, settings.storeLat, settings.storeLng) <= settings.deliveryRadius
+             : true),
       });
     });
     // Sort so that isDefault is first, then by createdAt asc
@@ -691,6 +724,14 @@ export async function saveAddressToFirebase(
       street = parts.slice(1).join(",")?.trim() || address.addressLine || "";
     }
 
+    // Retrieve active delivery settings and evaluate serviceability
+    const settings = await fetchDeliveryZoneSettings();
+    let serviceable = true; 
+    if (typeof address.lat === "number" && typeof address.lng === "number") {
+      const distance = calculateDistance(address.lat, address.lng, settings.storeLat, settings.storeLng);
+      serviceable = distance <= settings.deliveryRadius;
+    }
+
     const payload = {
       fullName: address.name || ("fullName" in address ? (address as any).fullName : "") || "",
       phoneNumber: address.phone || ("phoneNumber" in address ? (address as any).phoneNumber : "") || "",
@@ -706,6 +747,7 @@ export async function saveAddressToFirebase(
       lat: typeof address.lat === "number" ? address.lat : null,
       lng: typeof address.lng === "number" ? address.lng : null,
       gpsAccuracy: typeof address.gpsAccuracy === "number" ? address.gpsAccuracy : null,
+      serviceable: serviceable,
     };
 
     if (isDefault) {
@@ -751,6 +793,7 @@ export async function saveAddressToFirebase(
       lat: typeof payload.lat === "number" ? payload.lat : undefined,
       lng: typeof payload.lng === "number" ? payload.lng : undefined,
       gpsAccuracy: typeof payload.gpsAccuracy === "number" ? payload.gpsAccuracy : undefined,
+      serviceable: payload.serviceable,
     };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, pathForWrite);
@@ -920,6 +963,11 @@ export async function syncProductToFirebase(product: Product): Promise<{ success
       rating: Number(product.rating || 4.5),
       ratingCount: Number(product.ratingCount || 0),
       ingredients: product.ingredients || "",
+      totalOrders: Number(product.totalOrders || 0),
+      totalSales: Number(product.totalSales || 0),
+      totalViews: Number(product.totalViews || 0),
+      totalSearchClicks: Number(product.totalSearchClicks || 0),
+      totalAddToCart: Number(product.totalAddToCart || 0),
       ...(product.nutrition ? { nutrition: product.nutrition } : {})
     };
 
@@ -996,6 +1044,11 @@ export async function fetchProductsFromFirebase(): Promise<Product[]> {
         ratingCount: Number(data.ratingCount) || 0,
         ingredients: data.ingredients || "",
         nutrition: data.nutrition || undefined,
+        totalOrders: Number(data.totalOrders) || 0,
+        totalSales: Number(data.totalSales) || 0,
+        totalViews: Number(data.totalViews) || 0,
+        totalSearchClicks: Number(data.totalSearchClicks) || 0,
+        totalAddToCart: Number(data.totalAddToCart) || 0,
       });
     });
     console.log(`[Inventory] Product Count: ${productsList.length}`);
@@ -1052,6 +1105,11 @@ export function onProductsSnapshot(onChange: (productsList: Product[]) => void):
           ratingCount: Number(data.ratingCount) || 0,
           ingredients: data.ingredients || "",
           nutrition: data.nutrition || undefined,
+          totalOrders: Number(data.totalOrders) || 0,
+          totalSales: Number(data.totalSales) || 0,
+          totalViews: Number(data.totalViews) || 0,
+          totalSearchClicks: Number(data.totalSearchClicks) || 0,
+          totalAddToCart: Number(data.totalAddToCart) || 0,
         });
       });
       console.log(`[Inventory] Product Count: ${productsList.length}`);
@@ -1166,4 +1224,141 @@ export async function deleteComboFromFirebase(comboId: string): Promise<{ succes
     return { success: false, error: error.message };
   }
 }
+
+/**
+ * --- SMART CART TRACKING ANALYTICS ---
+ */
+
+export async function trackProductView(productId: string): Promise<void> {
+  try {
+    const productRef = doc(db, "products", productId);
+    await updateDoc(productRef, {
+      totalViews: increment(1)
+    });
+    console.log(`[Analytics] Dynamic tracked view for product: ${productId}`);
+  } catch (error) {
+    console.warn(`[Analytics] Could not track view for ${productId}:`, error);
+  }
+}
+
+export async function trackProductSearchClick(productId: string): Promise<void> {
+  try {
+    const productRef = doc(db, "products", productId);
+    await updateDoc(productRef, {
+      totalSearchClicks: increment(1)
+    });
+    console.log(`[Analytics] Dynamic tracked search click for product: ${productId}`);
+  } catch (error) {
+    console.warn(`[Analytics] Could not track search click for ${productId}:`, error);
+  }
+}
+
+export async function trackProductAddToCart(productId: string): Promise<void> {
+  try {
+    const productRef = doc(db, "products", productId);
+    await updateDoc(productRef, {
+      totalAddToCart: increment(1)
+    });
+    console.log(`[Analytics] Dynamic tracked addToCart for product: ${productId}`);
+  } catch (error) {
+    console.warn(`[Analytics] Could not track addToCart for ${productId}:`, error);
+  }
+}
+
+export async function trackOrderPlacements(items: { productId: string; quantity: number }[]): Promise<void> {
+  try {
+    const batch = writeBatch(db);
+    items.forEach((item) => {
+      const productRef = doc(db, "products", item.productId);
+      batch.update(productRef, {
+        totalOrders: increment(1),
+        totalSales: increment(item.quantity)
+      });
+    });
+    await batch.commit();
+    console.log(`[Analytics] Dynamic tracked order placements for ${items.length} items`);
+  } catch (error) {
+    console.warn("[Analytics] Could not track order placements batch:", error);
+  }
+}
+
+/**
+ * --- DELIVERY ZONE & COORDS SERVICEABILITY UTILITIES ---
+ */
+
+export interface DeliveryZoneSettings {
+  storeLat: number;
+  storeLng: number;
+  deliveryRadius: number; // in KM
+}
+
+export const DEFAULT_DELIVERY_ZONE: DeliveryZoneSettings = {
+  storeLat: 28.0793575,
+  storeLng: 80.4672899,
+  deliveryRadius: 3.0,
+};
+
+/**
+ * Calculates the geodesic distance between two points on the Earth's surface in kilometers using the Haversine formula
+ */
+export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Earth's mean radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c; // distance in km
+  return distance;
+}
+
+/**
+ * Retrieve current active delivery zone configuration from Firestore with local fallback
+ */
+export async function fetchDeliveryZoneSettings(): Promise<DeliveryZoneSettings> {
+  try {
+    const docRef = doc(db, "settings", "delivery_zone");
+    const snap = await getDoc(docRef);
+    if (snap.exists()) {
+      const data = snap.data();
+      return {
+        storeLat: typeof data.storeLat === "number" ? data.storeLat : DEFAULT_DELIVERY_ZONE.storeLat,
+        storeLng: typeof data.storeLng === "number" ? data.storeLng : DEFAULT_DELIVERY_ZONE.storeLng,
+        deliveryRadius: typeof data.deliveryRadius === "number" ? data.deliveryRadius : DEFAULT_DELIVERY_ZONE.deliveryRadius,
+      };
+    }
+  } catch (error) {
+    console.warn("[DeliveryZoneSettings] Failed to fetch settings, using defaults:", error);
+  }
+  return DEFAULT_DELIVERY_ZONE;
+}
+
+/**
+ * Save updated delivery zone parameters to Firestore
+ */
+export async function saveDeliveryZoneSettings(settings: DeliveryZoneSettings): Promise<{ success: boolean; error?: string }> {
+  const pathForWrite = "settings/delivery_zone";
+  try {
+    const docRef = doc(db, "settings", "delivery_zone");
+    await setDoc(docRef, {
+      storeLat: Number(settings.storeLat),
+      storeLng: Number(settings.storeLng),
+      deliveryRadius: Number(settings.deliveryRadius),
+      updatedAt: new Date().toISOString(),
+    });
+    return { success: true };
+  } catch (error: any) {
+    console.error("[DeliveryZoneSettings] Failed to save settings:", error);
+    try {
+      handleFirestoreError(error, OperationType.WRITE, pathForWrite);
+    } catch (fsErr: any) {
+      return { success: false, error: fsErr.message || String(error) };
+    }
+  }
+}
+
 

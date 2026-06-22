@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { X, MapPin, ChevronRight, Check, Plus, ArrowLeft, ShieldCheck, Compass, Loader2, AlertTriangle } from "lucide-react";
 import { Address } from "../types";
 import DeliveryMap from "./DeliveryMap";
+import { calculateDistance } from "../lib/firebase";
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -12,6 +13,10 @@ interface CheckoutModalProps {
   onSelectAddress: (addr: Address) => void;
   totalAmount: number;
   onCompletePayment: (address: Address, payMethod: string) => void;
+  isStoreOpen?: boolean;
+  onStoreClosedClick?: () => void;
+  deliveryZoneSettings?: any;
+  onServiceNotAvailable?: () => void;
 }
 
 export default function CheckoutModal({
@@ -23,6 +28,10 @@ export default function CheckoutModal({
   onSelectAddress,
   totalAmount,
   onCompletePayment,
+  isStoreOpen = true,
+  onStoreClosedClick,
+  deliveryZoneSettings,
+  onServiceNotAvailable,
 }: CheckoutModalProps) {
   const [step, setStep] = useState<1 | 2>(1);
   const [isAddingAddress, setIsAddingAddress] = useState(false);
@@ -524,19 +533,26 @@ export default function CheckoutModal({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
                     {savedAddresses.map((addr) => {
                       const isSelected = selectedAddress?.id === addr.id;
+                      const isUnserviceable = addr.serviceable === false;
                       return (
                         <div
                           key={addr.id}
                           onClick={() => onSelectAddress(addr)}
                           className={`relative p-3.5 rounded-2xl border text-left cursor-pointer transition ${
-                            isSelected ? "border-green-500 bg-green-50/10 shadow-sm" : "border-gray-150 hover:bg-gray-50"
+                            isUnserviceable
+                              ? "border-red-200 bg-red-50/10 opacity-70"
+                              : isSelected
+                              ? "border-green-500 bg-green-50/10 shadow-sm"
+                              : "border-gray-150 hover:bg-gray-50"
                           }`}
                         >
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-[10px] font-black text-green-700 bg-green-50 px-2 py-0.5 rounded uppercase">
-                              {addr.label}
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded uppercase ${
+                              isUnserviceable ? "text-rose-700 bg-rose-50 border border-rose-100" : "text-green-700 bg-green-50"
+                            }`}>
+                              {addr.label} {isUnserviceable && "• Out of Area"}
                             </span>
-                            {isSelected && <Check className="h-4 w-4 text-green-600" />}
+                            {isSelected && !isUnserviceable && <Check className="h-4 w-4 text-green-600" />}
                           </div>
                           <p className="text-xs font-bold text-gray-800">{addr.name}</p>
                           <p className="text-xs text-gray-500 line-clamp-2 mt-0.5 font-medium leading-normal">{addr.addressLine}</p>
@@ -551,12 +567,44 @@ export default function CheckoutModal({
                 )}
               </div>
             )}
-
+ 
             {/* Step Continue buttons */}
             <div className="pt-4 border-t border-gray-100 flex justify-end">
               <button
-                disabled={isAddingAddress || !selectedAddress}
-                onClick={() => setStep(2)}
+                id="checkout-continue-btn"
+                disabled={isAddingAddress || !selectedAddress || !isStoreOpen}
+                onClick={() => {
+                  if (!isStoreOpen) {
+                    if (onStoreClosedClick) onStoreClosedClick();
+                    return;
+                  }
+                  if (!selectedAddress) return;
+
+                  const lat = selectedAddress.lat;
+                  const lng = selectedAddress.lng;
+                  const storeLat = deliveryZoneSettings?.storeLat ?? 28.0793575;
+                  const storeLng = deliveryZoneSettings?.storeLng ?? 80.4672899;
+                  const radiusLimit = deliveryZoneSettings?.deliveryRadius ?? 3.0;
+
+                  let isServiceable = true;
+                  if (typeof lat === "number" && typeof lng === "number") {
+                    const dist = calculateDistance(lat, lng, storeLat, storeLng);
+                    if (dist > radiusLimit) {
+                      isServiceable = false;
+                    }
+                  } else if (selectedAddress.serviceable === false) {
+                    isServiceable = false;
+                  }
+
+                  if (!isServiceable) {
+                    if (onServiceNotAvailable) {
+                      onServiceNotAvailable();
+                    }
+                    return;
+                  }
+
+                  setStep(2);
+                }}
                 className="flex items-center space-x-1.5 rounded-xl bg-gray-900 text-white px-5 py-2.5 font-black text-xs hover:bg-gray-800 transition disabled:bg-gray-150 disabled:text-gray-400 disabled:cursor-not-allowed cursor-pointer"
               >
                 <span>Continue to Payment</span>
@@ -706,14 +754,24 @@ export default function CheckoutModal({
               </button>
 
               <button
-                disabled={isProcessing || !selectedAddress || payMethod !== "Cash on Delivery (COD)"}
-                onClick={handleTriggerPayment}
+                disabled={isProcessing || !selectedAddress || payMethod !== "Cash on Delivery (COD)" || !isStoreOpen}
+                onClick={() => {
+                  if (!isStoreOpen) {
+                    if (onStoreClosedClick) onStoreClosedClick();
+                    return;
+                  }
+                  handleTriggerPayment();
+                }}
                 className="flex items-center space-x-2 rounded-xl bg-green-500 text-white px-6 py-3 font-black text-xs hover:bg-green-600 transition shadow-lg shadow-green-100 disabled:opacity-50 disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed cursor-pointer"
               >
                 {isProcessing ? (
                   <>
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     <span>Processing Securely...</span>
+                  </>
+                ) : !isStoreOpen ? (
+                  <>
+                    <span>Store Closed</span>
                   </>
                 ) : payMethod.startsWith("UPI") ? (
                   <>
@@ -764,8 +822,15 @@ export default function CheckoutModal({
                 Back
               </button>
               <button
-                onClick={handleConfirmFinalOrderPlacement}
-                className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 active:scale-95 text-white font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer text-center shadow-lg shadow-green-150"
+                disabled={!isStoreOpen}
+                onClick={() => {
+                  if (!isStoreOpen) {
+                    if (onStoreClosedClick) onStoreClosedClick();
+                    return;
+                  }
+                  handleConfirmFinalOrderPlacement();
+                }}
+                className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 active:scale-95 text-white font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer text-center shadow-lg shadow-green-150 disabled:opacity-50 disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed"
                 id="accept-cancellation-policy-btn"
               >
                 Confirm Order

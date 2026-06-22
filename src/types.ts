@@ -22,6 +22,13 @@ export interface Product {
   rating: number;
   ratingCount: number;
   
+  // Dynamic analytics fields
+  totalOrders?: number;
+  totalSales?: number;
+  totalViews?: number;
+  totalSearchClicks?: number;
+  totalAddToCart?: number;
+  
   // Strict Firestore-only product system fields
   price?: number;
   mrp?: number;
@@ -61,6 +68,7 @@ export interface Address {
   lat?: number;
   lng?: number;
   gpsAccuracy?: number;
+  serviceable?: boolean;
 }
 
 export interface Rider {

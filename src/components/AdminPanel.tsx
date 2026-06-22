@@ -21,7 +21,8 @@ import {
   ExternalLink,
   LogOut,
   RefreshCw,
-  Clock
+  Clock,
+  Settings
 } from "lucide-react";
 import { Product, Order, Rider, ComboDeal } from "../types";
 import { INITIAL_CATEGORIES } from "../data";
@@ -47,6 +48,8 @@ interface AdminPanelProps {
   onAddCombo?: (combo: ComboDeal) => void;
   onDeleteCombo?: (id: string) => void;
   onUpdateProduct?: (p: Product) => void;
+  deliveryZoneSettings?: any;
+  onUpdateDeliveryZoneSettings?: (settings: any) => Promise<void>;
 }
 
 export default function AdminPanel({
@@ -66,9 +69,11 @@ export default function AdminPanel({
   combos = [],
   onAddCombo,
   onDeleteCombo,
+  deliveryZoneSettings,
+  onUpdateDeliveryZoneSettings,
 }: AdminPanelProps) {
   // --- Admin Navigation & Auth States ---
-  const [adminTab, setAdminTab] = useState<"kpis" | "products" | "combos" | "orders" | "riders" | "users">("kpis");
+  const [adminTab, setAdminTab] = useState<"kpis" | "products" | "combos" | "orders" | "riders" | "users" | "settings">("kpis");
   const isLoggedIn = isCustomerLoggedIn && userEmail === "himanshu712007@gmail.com";
 
   // --- Real-Time Logged-In User Monitoring state ---
@@ -461,6 +466,15 @@ export default function AdminPanel({
             >
               <Users className="h-3 w-3 text-teal-650" />
               <span>Users ({userProfiles.length})</span>
+            </button>
+            <button
+              onClick={() => setAdminTab("settings")}
+              className={`px-3 py-1.5 rounded-xl text-[11px] font-black transition cursor-pointer flex items-center space-x-1.5 ${
+                adminTab === "settings" ? "bg-white text-gray-900 shadow-xs" : "text-gray-500 hover:text-gray-955"
+              }`}
+            >
+              <Settings className="h-3 w-3 text-indigo-650" />
+              <span>Settings</span>
             </button>
           </div>
 
@@ -2573,6 +2587,120 @@ export default function AdminPanel({
         </div>
       )}
 
+      {/* ================= SETTINGS / DELIVERY ZONE TAB ================= */}
+      {adminTab === "settings" && (
+        <div id="admin-settings-delivery-tab" className="bg-white border border-gray-150 rounded-3xl p-6 shadow-xs animate-in fade-in duration-200 text-left mt-4">
+          <div className="flex items-center space-x-2.5 mb-2">
+            <Settings className="h-5 w-5 text-indigo-600" />
+            <h3 className="text-base font-black text-gray-900 uppercase tracking-tight">Settings — Delivery Zone</h3>
+          </div>
+          <p className="text-xs text-gray-500 mb-6 max-w-2xl leading-relaxed">
+            Manage your store's operational geographical epicenter coordinates and maximum allowed shipping distance radius. Outbound order attempts will validate against these coordinates on both frontend and backend.
+          </p>
+
+          <AdminDeliveryZoneSettings settings={deliveryZoneSettings} onSave={onUpdateDeliveryZoneSettings} />
+        </div>
+      )}
+
     </div>
+  );
+}
+
+function AdminDeliveryZoneSettings({ settings, onSave }: { settings: any; onSave: any }) {
+  const [latVal, setLatVal] = useState(settings?.storeLat ?? 28.0793575);
+  const [lngVal, setLngVal] = useState(settings?.storeLng ?? 80.4672899);
+  const [radiusVal, setRadiusVal] = useState(settings?.deliveryRadius ?? 3.0);
+  const [isSaving, setIsSaving] = useState(false);
+  const [success, setSuccess] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (settings) {
+      setLatVal(settings.storeLat);
+      setLngVal(settings.storeLng);
+      setRadiusVal(settings.deliveryRadius);
+    }
+  }, [settings]);
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSaving(true);
+    setSuccess("");
+    setError("");
+    try {
+      if (typeof onSave === "function") {
+        await onSave({
+          storeLat: Number(latVal),
+          storeLng: Number(lngVal),
+          deliveryRadius: Number(radiusVal),
+        });
+        setSuccess("Delivery zone settings successfully updated and synched to cloud databases permanently!");
+      } else {
+        setError("Operational error: onSave property not configured.");
+      }
+    } catch (err: any) {
+      setError(err?.message || "Failed to update delivery zone settings.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleUpdate} className="space-y-4 max-w-lg">
+      {success && (
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-xl text-xs font-bold leading-normal">
+          {success}
+        </div>
+      )}
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-xl text-xs font-bold leading-normal">
+          {error}
+        </div>
+      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Store Latitude *</label>
+          <input
+            type="number"
+            step="any"
+            required
+            className="w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-medium focus:ring-1 focus:ring-indigo-500 outline-none"
+            value={latVal}
+            onChange={(e) => setLatVal(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Store Longitude *</label>
+          <input
+            type="number"
+            step="any"
+            required
+            className="w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-medium focus:ring-1 focus:ring-indigo-500 outline-none"
+            value={lngVal}
+            onChange={(e) => setLngVal(e.target.value)}
+          />
+        </div>
+      </div>
+      <div>
+        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-1">Delivery Limit Radius (KM) *</label>
+        <input
+          type="number"
+          step="0.1"
+          min="0.1"
+          required
+          className="w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-medium focus:ring-1 focus:ring-indigo-500 outline-none"
+          value={radiusVal}
+          onChange={(e) => setRadiusVal(e.target.value)}
+        />
+      </div>
+
+      <button
+        type="submit"
+        disabled={isSaving}
+        className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer self-start shadow-md shadow-indigo-100"
+      >
+        {isSaving ? "Saving Settings..." : "Save Delivery Settings"}
+      </button>
+    </form>
   );
 }

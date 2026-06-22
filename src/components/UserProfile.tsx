@@ -1641,8 +1641,15 @@ export default function UserProfile({
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {savedAddresses.map((addr) => (
-                    <div key={addr.id} className="p-4 border border-gray-150 rounded-2xl bg-gray-50/20 text-left relative">
+                    <div key={addr.id} className={`p-4 border rounded-2xl text-left relative ${
+                      addr.serviceable === false ? "border-red-200 bg-red-50/10 animate-[pulse_3s_infinite]" : "border-gray-150 bg-gray-50/20"
+                    }`}>
                       <div className="absolute top-4 right-4 flex items-center gap-1.5">
+                        {addr.serviceable === false && (
+                          <span className="text-[8px] bg-rose-600 font-extrabold text-white px-1.5 py-0.5 rounded uppercase">
+                            🔴 Out of Area
+                          </span>
+                        )}
                         {addr.isDefault && (
                           <span className="text-[8px] bg-amber-500 font-extrabold text-white px-1.5 py-0.5 rounded uppercase">
                             Default

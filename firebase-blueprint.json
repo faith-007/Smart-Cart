@@ -247,7 +247,12 @@
         "isFeatured": { "type": "boolean" },
         "isBestOffer": { "type": "boolean" },
         "rating": { "type": "number" },
-        "ratingCount": { "type": "number" }
+        "ratingCount": { "type": "number" },
+        "totalOrders": { "type": "number", "description": "Total tracked orders containing this product" },
+        "totalSales": { "type": "number", "description": "Total tracked units sold of this product" },
+        "totalViews": { "type": "number", "description": "Total tracked views of this product details screen" },
+        "totalSearchClicks": { "type": "number", "description": "Total tracked clicks of this product from search results" },
+        "totalAddToCart": { "type": "number", "description": "Total tracked clicks on add to cart button" }
       },
       "required": ["id", "name", "category", "sellingPrice", "stock"]
     },

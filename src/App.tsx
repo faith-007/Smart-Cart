@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { INITIAL_CATEGORIES, INITIAL_PRODUCTS } from "./data";
 import { Product, Category, CartItem, Address, Order, Rider, ComboDeal } from "./types";
@@ -21,6 +21,9 @@ import RiderDashboard from "./components/RiderDashboard";
 import LocationOnboardingModal from "./components/LocationOnboardingModal";
 import ComboCard from "./components/ComboCard";
 import { 
+  calculateDistance,
+  fetchDeliveryZoneSettings,
+  saveDeliveryZoneSettings,
   syncOrderToFirebase, 
   fetchOrdersFromFirebase, 
   auth, 
@@ -46,8 +49,19 @@ import {
   subscribeToProducts,
   subscribeToCombos,
   saveComboToFirebase,
-  deleteComboFromFirebase
+  deleteComboFromFirebase,
+  trackProductView,
+  trackProductSearchClick,
+  trackProductAddToCart,
+  trackOrderPlacements
 } from "./lib/firebase";
+import {
+  sortProductsByPopularity,
+  getSmartSearchMatches,
+  getRelatedRecommendations,
+  getPersonalizedRecommendations,
+  smartShuffleAndInterleave
+} from "./lib/recommendations";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { onSnapshot, collection, query, where } from "firebase/firestore";
 
@@ -62,7 +76,49 @@ export default function App() {
   // --- Root States ---
   const [products, setProducts] = useState<Product[]>([]);
   const [productsLoaded, setProductsLoaded] = useState<boolean>(false);
+  const [shuffledProductIds, setShuffledProductIds] = useState<string[]>([]);
+  const hasInitializedShuffleRef = useRef<boolean>(false);
   const [combos, setCombos] = useState<ComboDeal[]>([]);
+
+  // Calculate stable random shuffle with category interleaving ONCE on initial load
+  useEffect(() => {
+    if (productsLoaded && products.length > 0 && !hasInitializedShuffleRef.current) {
+      hasInitializedShuffleRef.current = true;
+      const shuffled = smartShuffleAndInterleave(products);
+      setShuffledProductIds(shuffled.map((p) => p.id));
+    }
+  }, [productsLoaded, products]);
+
+  // Map the page-load static shuffled sequence to real-time updated products
+  const homepageProducts = React.useMemo(() => {
+    if (shuffledProductIds.length === 0) {
+      return products;
+    }
+    const productMap = new Map<string, Product>();
+    for (const p of products) {
+      if (p && p.id) {
+        productMap.set(p.id, p);
+      }
+    }
+
+    const ordered: Product[] = [];
+    for (const id of shuffledProductIds) {
+      const p = productMap.get(id);
+      if (p) {
+        ordered.push(p);
+      }
+    }
+
+    // Append any brand new items that are dynamically added in real-time
+    const shuffledSet = new Set(shuffledProductIds);
+    for (const p of products) {
+      if (p && p.id && !shuffledSet.has(p.id)) {
+        ordered.push(p);
+      }
+    }
+
+    return ordered;
+  }, [products, shuffledProductIds]);
 
   // --- Real-time Inventory Coordination ---
   useEffect(() => {
@@ -79,12 +135,12 @@ export default function App() {
         const dbProducts = await fetchProducts();
         console.log(`[Inventory] Product Count: ${dbProducts.length}`);
         
-        setProducts(dbProducts);
+        setProducts(sortProductsByPopularity(dbProducts));
         setProductsLoaded(true);
         
         // Setup real-time Firestore sync using subscriber mapping
         unsubscribeProducts = subscribeToProducts((updatedProductsList) => {
-          setProducts(updatedProductsList);
+          setProducts(sortProductsByPopularity(updatedProductsList));
           setProductsLoaded(true);
         });
 
@@ -119,6 +175,68 @@ export default function App() {
   const [savedAddresses, setSavedAddresses] = useState<Address[]>([]);
   const [currentAddress, setCurrentAddress] = useState<Address | null>(null);
   const [showLocationOnboarding, setShowLocationOnboarding] = useState<boolean>(false);
+
+  // --- Delivery Zone Settings & Serviceability ---
+  const [deliveryZoneSettings, setDeliveryZoneSettings] = useState<any>({ storeLat: 28.0793575, storeLng: 80.4672899, deliveryRadius: 3.0 });
+  const [showServiceNotAvailableModal, setShowServiceNotAvailableModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    fetchDeliveryZoneSettings().then((settings) => {
+      if (settings) {
+        setDeliveryZoneSettings(settings);
+      }
+    }).catch(err => {
+      console.warn("Could not load delivery zone settings from Firestore:", err);
+    });
+  }, []);
+
+  const handleUpdateDeliveryZoneSettings = async (newSettings: any) => {
+    await saveDeliveryZoneSettings(newSettings);
+    setDeliveryZoneSettings(newSettings);
+    // Refresh address serviceability list dynamically so that all addresses reflect changes instantly
+    const user = auth.currentUser;
+    if (user) {
+      const fresh = await fetchSavedAddressesFromFirebase(user.uid);
+      setSavedAddresses(fresh);
+      localStorage.setItem("smartcart_addresses", JSON.stringify(fresh));
+      if (currentAddress) {
+        const matching = fresh.find(a => a.id === currentAddress.id);
+        if (matching) {
+          setCurrentAddress(matching);
+        }
+      }
+    }
+  };
+
+  // --- Store Status in IST (8:00 AM - 9:00 PM IST) ---
+  const [isStoreOpen, setIsStoreOpen] = useState<boolean>(() => {
+    const now = new Date();
+    // UTC time in ms
+    const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+    // IST = UTC + 5:30 (5.5 * 3600000)
+    const istTime = new Date(utcTime + (5.5 * 3600000));
+    const hours = istTime.getHours();
+    const minutes = istTime.getMinutes();
+    const totalMinutes = hours * 60 + minutes;
+    return totalMinutes >= 8 * 60 && totalMinutes < 21 * 60;
+  });
+  const [showStoreClosedModal, setShowStoreClosedModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    const checkStoreStatus = () => {
+      const now = new Date();
+      const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+      const istTime = new Date(utcTime + (5.5 * 3600000));
+      const hours = istTime.getHours();
+      const minutes = istTime.getMinutes();
+      const totalMinutes = hours * 60 + minutes;
+      const isOpen = totalMinutes >= 8 * 60 && totalMinutes < 21 * 60;
+      setIsStoreOpen(isOpen);
+    };
+    checkStoreStatus();
+    const interval = setInterval(checkStoreStatus, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   // --- Open Modals/Drawers States ---
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
@@ -345,6 +463,75 @@ export default function App() {
       active = false;
     };
   }, [isCustomerLoggedIn, userEmail, userPhone, riders, auth.currentUser]);
+
+  // --- Personalization Tracking States ---
+  const [browsedCategories, setBrowsedCategories] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem("smartcart_browsed_categories");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [searchedKeywords, setSearchedKeywords] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("smartcart_searched_keywords");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("smartcart_browsed_categories", JSON.stringify(browsedCategories));
+  }, [browsedCategories]);
+
+  useEffect(() => {
+    localStorage.setItem("smartcart_searched_keywords", JSON.stringify(searchedKeywords));
+  }, [searchedKeywords]);
+
+  const recordSearchQuery = (query: string) => {
+    if (!query || query.trim() === "") return;
+    const normalized = query.trim().toLowerCase();
+    setSearchedKeywords(prev => {
+      if (prev.includes(normalized)) return prev;
+      return [normalized, ...prev].slice(0, 10);
+    });
+  };
+
+  // Track product details modal opening & browse behaviors
+  useEffect(() => {
+    if (selectedProduct) {
+      // Track view atomically in Firestore
+      trackProductView(selectedProduct.id);
+
+      // Track locally for recommendation weights
+      const cat = selectedProduct.category;
+      if (cat) {
+        setBrowsedCategories(prev => ({
+          ...prev,
+          [cat]: (prev[cat] || 0) + 1
+        }));
+      }
+
+      // If there is an active search, record search click analytics
+      if (searchQuery.trim() !== "") {
+        trackProductSearchClick(selectedProduct.id);
+        recordSearchQuery(searchQuery);
+      }
+    }
+  }, [selectedProduct?.id]);
+
+  // Debounced Search Query capture
+  useEffect(() => {
+    if (searchQuery.trim().length >= 3) {
+      const timer = setTimeout(() => {
+        recordSearchQuery(searchQuery);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [searchQuery]);
 
   // 1. Role-based Navigation Guarding
   useEffect(() => {
@@ -1009,6 +1196,15 @@ export default function App() {
   // --- Add / Remove / Qty Handlers ---
 
   const handleAddToCart = (product: Product) => {
+    if (!isCustomerLoggedIn) {
+      alert("Please login to continue.");
+      setActiveTab("profile");
+      return;
+    }
+
+    // Track click to add-to-cart in analytics database
+    trackProductAddToCart(product.id);
+
     const existing = cart.find((item) => item.product.id === product.id);
     let updated: CartItem[];
 
@@ -1146,6 +1342,10 @@ export default function App() {
           console.warn("[SmartCart Address DB] Could not sync addresses array to user profile", err);
         }
 
+        if (saved && saved.serviceable === false) {
+          setShowServiceNotAvailableModal(true);
+        }
+
         // Return the saved address to let callers know it's successfully complete
         return saved;
       } catch (error) {
@@ -1159,6 +1359,14 @@ export default function App() {
         id: isEditing ? (addrInput as Address).id : `addr-${Date.now()}`,
         isDefault: specifiedIsDefault !== undefined ? specifiedIsDefault : (savedAddresses.length === 0 || !!(addrInput as Address).isDefault),
       } as Address;
+
+      let serviceable = true;
+      if (typeof newAddr.lat === "number" && typeof newAddr.lng === "number") {
+        const dist = calculateDistance(newAddr.lat, newAddr.lng, deliveryZoneSettings.storeLat, deliveryZoneSettings.storeLng);
+        serviceable = dist <= deliveryZoneSettings.deliveryRadius;
+      }
+      newAddr.serviceable = serviceable;
+
       const updated = isEditing
         ? savedAddresses.map((a) => (a.id === newAddr.id ? newAddr : a))
         : [...savedAddresses, newAddr];
@@ -1169,8 +1377,21 @@ export default function App() {
 
       saveAddresses(cleaned);
       setCurrentAddress(newAddr);
+
+      if (newAddr.serviceable === false) {
+        setShowServiceNotAvailableModal(true);
+      }
+
       return newAddr;
     }
+  };
+
+  const handleSelectAddress = (addr: Address | null) => {
+    if (addr && addr.serviceable === false) {
+      setShowServiceNotAvailableModal(true);
+      return;
+    }
+    setCurrentAddress(addr);
   };
 
   const handleRemoveAddressCoord = async (id: string) => {
@@ -1334,23 +1555,79 @@ export default function App() {
   // --- Checkout and Order Processing Handlers ---
 
   const handleCheckoutProced = () => {
+    // Block checkout proceed if store is closed
+    const now = new Date();
+    const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const istTime = new Date(utcTime + (5.5 * 3600000));
+    const hours = istTime.getHours();
+    const minutes = istTime.getMinutes();
+    const totalMinutes = hours * 60 + minutes;
+    const isCurrentlyOpen = totalMinutes >= 8 * 60 && totalMinutes < 21 * 60;
+
+    if (!isCurrentlyOpen) {
+      setIsCartOpen(false);
+      setShowStoreClosedModal(true);
+      return;
+    }
+
     setIsCartOpen(false);
     if (!isCustomerLoggedIn) {
-      alert("Please sign up or log in first to proceed with your delivery order.");
+      alert("Please login to continue.");
       setActiveTab("profile");
       return;
     }
     // Automatically select default address if not currently set
+    let targetAddress = currentAddress;
     if (savedAddresses && savedAddresses.length > 0) {
-      if (!currentAddress || !savedAddresses.some(a => a.id === currentAddress.id)) {
+      if (!targetAddress || !savedAddresses.some(a => a.id === targetAddress.id)) {
         const defaultAddr = savedAddresses.find(a => a.isDefault === true) || savedAddresses[0];
+        targetAddress = defaultAddr;
         setCurrentAddress(defaultAddr);
       }
     }
+
+    if (targetAddress) {
+      const lat = targetAddress.lat;
+      const lng = targetAddress.lng;
+      const storeLat = deliveryZoneSettings?.storeLat ?? 28.0793575;
+      const storeLng = deliveryZoneSettings?.storeLng ?? 80.4672899;
+      const radiusLimit = deliveryZoneSettings?.deliveryRadius ?? 3.0;
+
+      let isServiceable = true;
+      if (typeof lat === "number" && typeof lng === "number") {
+        const dist = calculateDistance(lat, lng, storeLat, storeLng);
+        if (dist > radiusLimit) {
+          isServiceable = false;
+        }
+      } else if (targetAddress.serviceable === false) {
+        isServiceable = false;
+      }
+
+      if (!isServiceable) {
+        setShowServiceNotAvailableModal(true);
+        return;
+      }
+    }
+
     setIsCheckoutOpen(true);
   };
 
   const handleCompleteOrderPayment = (address: Address, payMethod: string) => {
+    // Fail-safe timezone guard against store hours
+    const now = new Date();
+    const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const istTime = new Date(utcTime + (5.5 * 3600000));
+    const hours = istTime.getHours();
+    const minutes = istTime.getMinutes();
+    const totalMinutes = hours * 60 + minutes;
+    const isCurrentlyOpen = totalMinutes >= 8 * 60 && totalMinutes < 21 * 60;
+
+    if (!isCurrentlyOpen) {
+      setIsCheckoutOpen(false);
+      setShowStoreClosedModal(true);
+      return;
+    }
+
     // Dynamic pricing calculations based on new system rules
     const {
       subtotal,
@@ -1452,6 +1729,15 @@ export default function App() {
     // Sync order to your Firebase backend and dispatch SMTP email notification
     (async () => {
       console.log(`[SmartCart Firebase] Initializing Firestore write for order: ${newOrder.id}...`);
+      try {
+        const itemsToTrack = newOrder.items.map((item: any) => ({
+          productId: item.product.id,
+          quantity: item.quantity
+        }));
+        await trackOrderPlacements(itemsToTrack);
+      } catch (err) {
+        console.warn("[Analytics] Order placement analytics tracking failed:", err);
+      }
       try {
         const result = await syncOrderToFirebase(newOrder);
         if (result?.success) {
@@ -1859,17 +2145,23 @@ export default function App() {
   };
 
   // --- Search and category filters logic ---
-  const filteredProducts = products.filter((p) => {
-    const matchesCategory = selectedCategory === null || p.category === selectedCategory;
+  const filteredProducts = React.useMemo(() => {
+    let resultList = products;
+    if (searchQuery.trim() !== "") {
+      resultList = getSmartSearchMatches(products, searchQuery);
+    }
     
-    const term = searchQuery.trim().toLowerCase();
-    const matchesSearch = term === "" ||
-      p.name.toLowerCase().includes(term) ||
-      p.brand.toLowerCase().includes(term) ||
-      p.category.toLowerCase().includes(term);
+    if (selectedCategory !== null) {
+      resultList = resultList.filter((p) => p.category === selectedCategory);
+    }
+    
+    return sortProductsByPopularity(resultList);
+  }, [products, searchQuery, selectedCategory]);
 
-    return matchesCategory && matchesSearch;
-  });
+  const searchRelatedRecommendations = React.useMemo(() => {
+    if (searchQuery.trim() === "") return [];
+    return getRelatedRecommendations(products, filteredProducts, searchQuery);
+  }, [products, filteredProducts, searchQuery]);
 
   const buyAgainProducts = React.useMemo(() => {
     const currentUid = auth.currentUser?.uid;
@@ -1896,22 +2188,41 @@ export default function App() {
           .map((item) => item.product);
 
         if (sorted.length > 0) {
-          return sorted;
+          return sorted.slice(0, 8);
         }
       }
     }
-    
-    // Fallback: Show first 8 popular products from active catalog based on ratingCount
-    return [...products]
-      .sort((a, b) => (b.ratingCount || 0) - (a.ratingCount || 0))
-      .slice(0, 8);
+    return [];
   }, [orders, products]);
 
+  // Personalized recommendations
+  const personalizedRecommendations = React.useMemo(() => {
+    const currentUid = auth.currentUser?.uid;
+    return getPersonalizedRecommendations(
+      products,
+      orders,
+      currentUid,
+      browsedCategories,
+      searchedKeywords
+    ).slice(0, 8);
+  }, [products, orders, auth.currentUser?.uid, browsedCategories, searchedKeywords]);
+
+  // Fallback / Guest popularity list: Most Selling Products
+  const mostSellingProducts = React.useMemo(() => {
+    return sortProductsByPopularity(products).slice(0, 8);
+  }, [products]);
+
   // Best offers subset
-  const bestOffersSubset = products.filter((p) => p.isBestOffer === true).slice(0, 4);
+  const bestOffersSubset = React.useMemo(() => {
+    const filtered = products.filter((p) => p.isBestOffer === true);
+    return sortProductsByPopularity(filtered).slice(0, 4);
+  }, [products]);
 
   // Featured items subset
-  const featuredSubset = products.filter((p) => p.isFeatured === true).slice(0, 4);
+  const featuredSubset = React.useMemo(() => {
+    const filtered = products.filter((p) => p.isFeatured === true);
+    return sortProductsByPopularity(filtered).slice(0, 4);
+  }, [products]);
 
   const cartCount = cart.reduce((acc, curr) => acc + curr.quantity, 0);
   const cartTotal = cart.reduce((acc, curr) => acc + curr.product.sellingPrice * curr.quantity, 0);
@@ -1934,7 +2245,7 @@ export default function App() {
           }}
           savedAddresses={savedAddresses}
           currentAddress={currentAddress}
-          setCurrentAddress={setCurrentAddress}
+          setCurrentAddress={handleSelectAddress}
           onSearch={setSearchQuery}
           allProducts={products}
           onProductClick={(p) => setSelectedProduct(p)}
@@ -1953,6 +2264,68 @@ export default function App() {
         {/* 1. HOME VIEW */}
         {activeTab === "home" && (
           <main className="animate-fade-in pb-24 md:pb-12">
+            
+            {/* Store Status Notice Banner */}
+            {!isStoreOpen && (
+              <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-4 font-sans select-none animate-fade-in">
+                <div id="store-status-banner-closed" className="w-full bg-rose-50 border border-rose-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between text-left shadow-xs gap-3">
+                  <div className="flex items-start sm:items-center space-x-3">
+                    <span className="text-2xl mt-0.5 sm:mt-0 leading-none shrink-0" role="img" aria-label="Store Closed">🔴</span>
+                    <div>
+                      <h4 className="text-sm md:text-base font-black text-rose-955">Store Closed</h4>
+                      <p className="text-xs text-rose-700 font-bold mt-0.5">
+                        Orders are accepted only between 8:00 AM and 9:00 PM.
+                      </p>
+                      <p className="text-[11px] text-rose-600 font-semibold mt-1">
+                        Please visit again during operating hours.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] bg-rose-100 text-rose-800 px-3 py-1.5 rounded-lg font-black uppercase tracking-wider shrink-0 self-start sm:self-center">
+                    Offline
+                  </span>
+                </div>
+              </div>
+            )}
+            
+            {/* Delivery Area Serviceability Banner */}
+            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-4 font-sans select-none animate-fade-in" id="delivery-serviceable-banner-section">
+              {(!currentAddress || (currentAddress.serviceable !== false && (typeof currentAddress.lat !== "number" || typeof currentAddress.lng !== "number" || calculateDistance(currentAddress.lat, currentAddress.lng, deliveryZoneSettings.storeLat, deliveryZoneSettings.storeLng) <= deliveryZoneSettings.deliveryRadius))) ? (
+                <div id="delivery-zone-banner-open" className="w-full bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between text-left shadow-xs gap-3">
+                  <div className="flex items-start sm:items-center space-x-3">
+                    <span className="text-2xl mt-0.5 sm:mt-0 leading-none shrink-0" role="img" aria-label="Delivery Available">🟢</span>
+                    <div>
+                      <h4 className="text-sm md:text-base font-black text-emerald-955">Delivery Available in Your Area</h4>
+                      <p className="text-xs text-emerald-700 font-bold mt-0.5">
+                        {currentAddress && typeof currentAddress.lat === "number" && typeof currentAddress.lng === "number"
+                          ? `Your selected address is within our fast dispatch zone (${calculateDistance(currentAddress.lat, currentAddress.lng, deliveryZoneSettings.storeLat, deliveryZoneSettings.storeLng).toFixed(2)} KM from store).` 
+                          : `We are accepting instant grocery dispatches within a ${deliveryZoneSettings.deliveryRadius} KM radius.`}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-lg font-black uppercase tracking-wider shrink-0 self-start sm:self-center">
+                    Serviceable
+                  </span>
+                </div>
+              ) : (
+                <div id="delivery-zone-banner-closed" className="w-full bg-rose-50 border border-rose-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between text-left shadow-xs gap-3">
+                  <div className="flex items-start sm:items-center space-x-3">
+                    <span className="text-2xl mt-0.5 sm:mt-0 leading-none shrink-0" role="img" aria-label="Delivery Restricted">🔴</span>
+                    <div>
+                      <h4 className="text-sm md:text-base font-black text-rose-955">Delivery Not Available in Your Area ({deliveryZoneSettings.deliveryRadius} KM Radius)</h4>
+                      <p className="text-xs text-rose-700 font-bold mt-0.5">
+                        {currentAddress && typeof currentAddress.lat === "number" && typeof currentAddress.lng === "number"
+                          ? `Selected address is ${calculateDistance(currentAddress.lat, currentAddress.lng, deliveryZoneSettings.storeLat, deliveryZoneSettings.storeLng).toFixed(2)} KM away, which exceeds our ${deliveryZoneSettings.deliveryRadius} KM maximum limit.` 
+                          : `Sorry, we are currently unable to dispatch to your coordinates.`}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] bg-rose-100 text-rose-850 px-3 py-1.5 rounded-lg font-black uppercase tracking-wider shrink-0 self-start sm:self-center">
+                    Blocked
+                  </span>
+                </div>
+              )}
+            </div>
             
             {/* Show Hero Promo Carousel ONLY if no category filter or search active */}
             {!selectedCategory && searchQuery.trim() === "" && (
@@ -1975,175 +2348,7 @@ export default function App() {
               }}
             />
 
-            {/* --- Combo Deals Section --- */}
-            {!selectedCategory && searchQuery.trim() === "" && combos.length > 0 && (
-              <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-6 mb-4 text-left" id="homepage-combo-deals">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-xl md:text-2xl select-none">🔥</span>
-                    <div>
-                      <h2 className="text-base sm:text-xl font-black text-gray-955 tracking-tight leading-tight uppercase">Combo Deals</h2>
-                      <p className="text-[10px] md:text-xs text-gray-400 font-extrabold uppercase">Save flat discounts with instant food stacks</p>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {combos.map((combo) => {
-                    const savings = combo.originalPrice - combo.sellingPrice;
-                    return (
-                      <div key={combo.id} className="bg-gradient-to-br from-amber-50/50 to-orange-50/20 border border-orange-100 hover:border-orange-200 transition-all rounded-3xl p-4 flex flex-col justify-between shadow-xs hover:shadow-md group relative overflow-hidden" id={`combo-${combo.id}`}>
-                        {/* Visual accent badge */}
-                        <div className="absolute top-3 right-3 bg-red-500 text-white font-black text-[9px] px-2 py-1 rounded-full uppercase tracking-wider shadow-xs animate-pulse">
-                          SAVE ₹{savings}
-                        </div>
-                        
-                        <div className="flex gap-4 items-start">
-                          {/* Combo Image */}
-                          <div className="h-20 w-20 sm:h-24 sm:w-24 bg-white rounded-2xl flex items-center justify-center shrink-0 border border-orange-100/50 overflow-hidden group-hover:scale-105 transition-all">
-                            <img src={combo.image || "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&q=80&w=200"} alt={combo.title} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
-                          </div>
-                          
-                          {/* Combo Title & Specs */}
-                          <div className="flex-1 min-w-0 text-left">
-                            <span className="text-[10px] font-black text-red-650 bg-red-50/80 px-2 py-0.5 rounded uppercase tracking-wider mb-1 inline-block">
-                              {combo.badge || "Combo Deal"}
-                            </span>
-                            <h3 className="text-sm font-black text-gray-900 group-hover:text-red-100 transition truncate leading-tight">
-                              {combo.title}
-                            </h3>
-                            <p className="text-[11px] text-gray-500 font-semibold leading-normal mt-1 line-clamp-2">
-                              Combine & pack items together under instant bundle deal.
-                            </p>
-                          </div>
-                        </div>
-                        
-                        {/* Bottom pricing and Buy button */}
-                        <div className="mt-4 pt-3 border-t border-dotted border-orange-100 flex items-center justify-between">
-                          <div className="text-left">
-                            <p className="text-[9px] text-gray-400 font-bold uppercase leading-none">Combo Price</p>
-                            <div className="flex items-center space-x-1.5 mt-0.5">
-                              <span className="text-base font-black text-gray-900">₹{combo.sellingPrice}</span>
-                              <span className="text-xs font-semibold text-gray-400 line-through font-mono">₹{combo.originalPrice}</span>
-                            </div>
-                          </div>
-                          
-                          <button
-                            onClick={() => {
-                              const pseudoProduct: Product = {
-                                id: combo.id,
-                                name: combo.title,
-                                brand: "Combo Deals",
-                                category: "Combo Deals",
-                                sellingPrice: combo.sellingPrice,
-                                marketPrice: combo.originalPrice,
-                                discount: Math.round((savings / combo.originalPrice) * 100),
-                                image: combo.image,
-                                stock: 50, // virtual high stock for combo bundles
-                                available: true,
-                                rating: 5.0,
-                                ratingCount: 1,
-                                description: `Package deal containing: ${combo.title}`,
-                                weight: "1 pack",
-                                isFeatured: false,
-                                isBestOffer: false,
-                              };
-                              handleAddToCart(pseudoProduct);
-                              console.log(`[Inventory] Added Combo to Cart: ${combo.title}`);
-                            }}
-                            className="bg-red-500 hover:bg-red-650 active:scale-95 text-white font-black text-xs px-4 py-2 rounded-xl transition shadow-xs flex items-center space-x-1 cursor-pointer"
-                            id={`add-combo-to-cart-${combo.id}`}
-                          >
-                            <span>Add Combo</span>
-                            <span>+</span>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
-
-            {/* --- Buy Again Segment --- */}
-            {!selectedCategory && searchQuery.trim() === "" && buyAgainProducts.length > 0 && (
-              <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-6 mb-4 text-left font-sans" id="homepage-buy-again">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-xl md:text-2xl select-none">🛒</span>
-                    <div>
-                      <h2 className="text-base sm:text-xl font-black text-gray-955 tracking-tight leading-tight uppercase">Buy Again</h2>
-                      <p className="text-[10px] md:text-xs text-gray-400 font-extrabold uppercase">Personalized curation from your historical purchases</p>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Horizontal Scrolling wrapper */}
-                <div className="flex space-x-4 overflow-x-auto pb-4 scrollbar-thin scrollbar-thumb-gray-200 scroll-smooth -mx-4 px-4 sm:mx-0 sm:px-0">
-                  {buyAgainProducts.map((p) => {
-                    const isInWishlist = wishlist.some((x) => x.id === p.id);
-                    return (
-                      <div
-                        key={`buy-again-${p.id}`}
-                        className="bg-white border border-gray-150 rounded-2xl p-3 shrink-0 w-[160px] sm:w-[180px] shadow-xs hover:shadow-md transition-all flex flex-col justify-between group"
-                      >
-                        {/* Upper image and metadata */}
-                        <div className="relative">
-                          <button
-                            onClick={() => handleToggleWishlist(p)}
-                            className="absolute top-1.5 right-1.5 p-1 bg-white/90 backdrop-blur-xs rounded-full shadow-xs hover:bg-white z-10 transition active:scale-90 border border-gray-100"
-                          >
-                            <span className="text-[12px] flex items-center justify-center">
-                              {isInWishlist ? "❤️" : "🤍"}
-                            </span>
-                          </button>
-                          
-                          <div
-                            onClick={() => setSelectedProduct(p)}
-                            className="h-28 w-full bg-gray-50/55 rounded-xl flex items-center justify-center overflow-hidden cursor-pointer group-hover:scale-102 transition"
-                          >
-                            <img
-                              src={p.image}
-                              alt={p.name}
-                              className="h-full w-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                          </div>
-                        </div>
-
-                        {/* Title and pricing details */}
-                        <div className="mt-2 flex-1 flex flex-col justify-between">
-                          <div onClick={() => setSelectedProduct(p)} className="cursor-pointer text-left">
-                            <p className="text-[9px] text-gray-400 font-bold uppercase leading-none truncate">{p.brand}</p>
-                            <h4 className="text-xs font-black text-gray-955 mt-1 truncate group-hover:text-amber-600 transition">
-                              {p.name}
-                            </h4>
-                            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">{p.weight || "1 unit"}</p>
-                          </div>
-
-                          <div className="mt-3 pt-2 border-t border-gray-50 flex items-center justify-between">
-                            <div className="text-left">
-                              <span className="text-xs font-black text-gray-955">₹{p.sellingPrice}</span>
-                              {p.marketPrice > p.sellingPrice && (
-                                <span className="text-[9px] text-gray-400 font-bold line-through ml-1 font-mono font-sans">₹{p.marketPrice}</span>
-                              )}
-                            </div>
-
-                            <button
-                              onClick={() => handleAddToCart(p)}
-                              className="h-7 w-7 bg-green-500 hover:bg-green-655 active:scale-95 text-white font-bold rounded-lg flex items-center justify-center transition shadow-xs cursor-pointer"
-                              title="Instantly add to delivery bag"
-                            >
-                              <span className="text-sm font-black">+</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
+            {/* Dynamic layout prioritization section will render lower down under catalog grids */}
 
             {/* Show Mobile Promo Banner ONLY if no category filter or search active */}
             {!selectedCategory && searchQuery.trim() === "" && (
@@ -2300,24 +2505,53 @@ export default function App() {
                       ))}
                     </div>
                   )}
+
+                  {/* --- Search Related Recommendations --- */}
+                  {searchRelatedRecommendations.length > 0 && (
+                    <div className="mt-8 border-t border-gray-100 pt-6 text-left animate-fade-in" id="search-related-recommendations">
+                      <div className="mb-4">
+                        <span className="text-[8px] xs:text-[10px] bg-sky-100 text-sky-700 font-bold px-1.5 py-0.5 rounded uppercase font-black">Recommendations</span>
+                        <h3 className="text-sm md:text-lg font-black text-gray-900 tracking-tight mt-0.5">🛍️ You May Also Like</h3>
+                        <p className="text-[10px] md:text-xs text-gray-400 font-semibold mt-0.5">Complementary and related items based on your search</p>
+                      </div>
+                      <div className="grid grid-cols-3 gap-1.5 xs:gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
+                        {searchRelatedRecommendations.map((p) => (
+                          <ProductCard
+                            key={`related-rec-${p.id}`}
+                            product={p}
+                            cartQty={cart.find((item) => item.product.id === p.id)?.quantity || 0}
+                            onAddToCart={handleAddToCart}
+                            onRemoveFromCart={handleRemoveFromCart}
+                            isWishlisted={wishlist.some((it) => it.id === p.id)}
+                            onToggleWishlist={handleToggleWishlist}
+                            onSelectProduct={(item) => setSelectedProduct(item)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
-                /* OTHERWISE structures bento blocks: Offers -> Featured -> Top Selling */
+                /* SINGLE UNIFIED HOMEPAGE PRODUCT FEED showing ALL products with smart page-load shuffle & interleaving category distribution */
                 <div className="gap-5 md:gap-8 flex flex-col">
-                  
-                  {/* BEST OFFERS PANEL */}
-                  {bestOffersSubset.length > 0 && (
-                    <section className="text-left px-1.5 sm:px-0">
-                      <div className="mb-2.5 md:mb-4">
-                        <span className="text-[8px] xs:text-[10px] bg-orange-100 text-[#F97316] font-bold px-1.5 py-0.5 rounded uppercase font-black">Daily Essentials</span>
-                        <h3 className="text-sm md:text-lg font-black text-gray-900 tracking-tight mt-0.5 md:mt-1">Best Value Deals</h3>
-                        <p className="text-[10px] md:text-xs text-gray-400 font-semibold leading-none mt-0.5 md:mt-1">Grab fresh items at the best prices today</p>
+                  {homepageProducts.length > 0 && (
+                    <section className="text-left px-1.5 sm:px-0 animate-fade-in" id="homepage-shuffled-catalog">
+                      <div className="mb-4 md:mb-6">
+                        <span className="text-[8px] xs:text-[10px] bg-orange-100 text-[#F97316] font-bold px-1.5 py-0.5 rounded uppercase font-black tracking-wider">
+                          Fresh Grocery Catalog
+                        </span>
+                        <h3 className="text-sm md:text-xl font-black text-gray-900 tracking-tight mt-0.5 md:mt-1">
+                          Popular Products
+                        </h3>
+                        <p className="text-[10px] md:text-xs text-gray-400 font-semibold leading-none mt-0.5 md:mt-1">
+                          Delivered to your doorstep in 15 minutes
+                        </p>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-1.5 xs:gap-2.5 sm:grid-cols-4">
-                        {bestOffersSubset.map((p) => (
+                      <div className="grid grid-cols-3 gap-1.5 xs:gap-2.5 sm:grid-cols-4 lg:grid-cols-5">
+                        {homepageProducts.map((p) => (
                           <ProductCard
-                            key={p.id}
+                            key={`shuffled-home-${p.id}`}
                             product={p}
                             cartQty={cart.find((item) => item.product.id === p.id)?.quantity || 0}
                             onAddToCart={handleAddToCart}
@@ -2330,57 +2564,6 @@ export default function App() {
                       </div>
                     </section>
                   )}
-
-                  {/* FEATURED SELECTION */}
-                  {featuredSubset.length > 0 && (
-                    <section className="text-left px-1.5 sm:px-0">
-                      <div className="mb-2.5 md:mb-4">
-                        <span className="text-[8px] xs:text-[10px] bg-green-100 text-green-700 font-bold px-1.5 py-0.5 rounded uppercase font-black">Chef Curations</span>
-                        <h3 className="text-sm md:text-lg font-black text-gray-900 tracking-tight mt-0.5 md:mt-1">Featured Essentials</h3>
-                        <p className="text-[10px] md:text-xs text-gray-400 font-semibold leading-none mt-0.5 md:mt-1">Gourmet ingredients & custom selections</p>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-1.5 xs:gap-2.5 sm:grid-cols-4">
-                        {featuredSubset.map((p) => (
-                          <ProductCard
-                            key={p.id}
-                            product={p}
-                            cartQty={cart.find((item) => item.product.id === p.id)?.quantity || 0}
-                            onAddToCart={handleAddToCart}
-                            onRemoveFromCart={handleRemoveFromCart}
-                            isWishlisted={wishlist.some((it) => it.id === p.id)}
-                            onToggleWishlist={handleToggleWishlist}
-                            onSelectProduct={(item) => setSelectedProduct(item)}
-                          />
-                        ))}
-                      </div>
-                    </section>
-                  )}
-
-                  {/* TOP SELLING PRODUCTS */}
-                  <section className="text-left px-1.5 sm:px-0">
-                    <div className="mb-2.5 md:mb-4">
-                      <span className="text-[8px] xs:text-[10px] bg-blue-100 text-blue-700 font-bold px-1.5 py-0.5 rounded uppercase font-black">All Catalog</span>
-                      <h3 className="text-sm md:text-lg font-black text-gray-900 tracking-tight mt-0.5 md:mt-1">Fresh Grocery Catalog</h3>
-                      <p className="text-[10px] md:text-xs text-gray-400 font-semibold leading-none mt-0.5 md:mt-1">Delivered in 15 minutes</p>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-1.5 xs:gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
-                      {products.map((p) => (
-                        <ProductCard
-                          key={p.id}
-                          product={p}
-                          cartQty={cart.find((item) => item.product.id === p.id)?.quantity || 0}
-                          onAddToCart={handleAddToCart}
-                          onRemoveFromCart={handleRemoveFromCart}
-                          isWishlisted={wishlist.some((it) => it.id === p.id)}
-                          onToggleWishlist={handleToggleWishlist}
-                          onSelectProduct={(item) => setSelectedProduct(item)}
-                        />
-                      ))}
-                    </div>
-                  </section>
-
                 </div>
               )}
 
@@ -2534,6 +2717,8 @@ export default function App() {
             combos={combos}
             onAddCombo={handleAddComboAdmin}
             onDeleteCombo={handleDeleteComboAdmin}
+            deliveryZoneSettings={deliveryZoneSettings}
+            onUpdateDeliveryZoneSettings={handleUpdateDeliveryZoneSettings}
           />
         ))}
 
@@ -2630,6 +2815,8 @@ export default function App() {
         onProceedToCheckout={handleCheckoutProced}
         appliedPromo={null}
         onApplyPromo={() => {}}
+        isStoreOpen={isStoreOpen}
+        onStoreClosedClick={() => setShowStoreClosedModal(true)}
       />
 
       {/* C. 3-STEP CHECKOUT modal */}
@@ -2639,9 +2826,13 @@ export default function App() {
         savedAddresses={savedAddresses}
         onAddAddress={handleAddAddressCoord}
         selectedAddress={currentAddress}
-        onSelectAddress={setCurrentAddress}
+        onSelectAddress={handleSelectAddress}
         totalAmount={calculatePricing(cartTotal).total}
         onCompletePayment={handleCompleteOrderPayment}
+        isStoreOpen={isStoreOpen}
+        onStoreClosedClick={() => setShowStoreClosedModal(true)}
+        deliveryZoneSettings={deliveryZoneSettings}
+        onServiceNotAvailable={() => setShowServiceNotAvailableModal(true)}
       />
 
       {/* C.2 LOCATION ONBOARDING modal for new user signup / login */}
@@ -2662,6 +2853,68 @@ export default function App() {
         onUpdateOrderStatus={handleUpdateOrderStatus}
         onAssignPartnerToOrder={handleAssignPartnerToOrder}
       />
+
+      {/* STORE CLOSED DIALOG POPUP */}
+      {showStoreClosedModal && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-gray-150 shadow-2xl relative overflow-hidden flex flex-col items-center text-center font-sans">
+            <span className="text-4xl mb-4">🏪</span>
+            <h3 className="text-base font-black text-gray-900 tracking-tight mb-2">
+              Store Currently Closed
+            </h3>
+            <p className="text-xs text-gray-600 font-bold mb-4">
+              SmartCart is currently closed.
+            </p>
+            <div className="bg-amber-50 rounded-2xl p-4 border border-amber-200/50 flex flex-col items-center w-full mb-5">
+              <span className="text-xs text-amber-800 font-extrabold leading-relaxed mb-1">
+                Orders can only be placed between:
+              </span>
+              <span className="text-sm text-amber-955 font-black flex items-center gap-1">
+                🕗 8:00 AM – 9:00 PM
+              </span>
+            </div>
+            <p className="text-[11px] text-gray-400 font-semibold mb-6">
+              Please visit again during store operating hours.
+            </p>
+            <button
+              onClick={() => setShowStoreClosedModal(false)}
+              className="w-full py-3 bg-green-500 hover:bg-green-600 text-white font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer text-center shadow-lg shadow-green-100"
+            >
+              ✓ OK
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* SERVICE NOT AVAILABLE DIALOG POPUP */}
+      {showServiceNotAvailableModal && (
+        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200" id="service-not-available-popup-container">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-gray-150 shadow-2xl relative overflow-hidden flex flex-col items-center text-center font-sans">
+            <span className="text-4xl mb-4">📍</span>
+            <h3 className="text-base font-black text-gray-900 tracking-tight mb-2">
+              Service Not Available
+            </h3>
+            <p className="text-xs text-gray-650 font-bold mb-4 leading-relaxed">
+              Sorry, SmartCart delivery service is currently available only within {deliveryZoneSettings.deliveryRadius || 3} KM of our store.
+            </p>
+            <div className="bg-rose-50 rounded-2xl p-4 border border-rose-200/50 flex flex-col items-center w-full mb-5">
+              <span className="text-[11px] text-rose-800 font-extrabold leading-relaxed mb-1">
+                Your selected address is outside our delivery area.
+              </span>
+              <span className="text-[11px] text-rose-955 font-bold">
+                Please choose another address within our service zone.
+              </span>
+            </div>
+            <button
+              id="service-not-available-popup-ok-btn"
+              onClick={() => setShowServiceNotAvailableModal(false)}
+              className="w-full py-3 bg-red-500 hover:bg-red-600 text-white font-black text-xs uppercase tracking-wider rounded-xl transition cursor-pointer text-center shadow-lg shadow-red-100"
+            >
+              ✓ OK
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Footnote Branding statement */}
       <footer className="bg-gray-900 text-white mt-12 py-10 text-xs border-t border-gray-800">

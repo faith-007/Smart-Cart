@@ -13,6 +13,8 @@ interface CartDrawerProps {
   onProceedToCheckout: () => void;
   appliedPromo?: any;
   onApplyPromo?: any;
+  isStoreOpen?: boolean;
+  onStoreClosedClick?: () => void;
 }
 
 export default function CartDrawer({
@@ -23,6 +25,8 @@ export default function CartDrawer({
   onRemoveItem,
   onSaveForLater,
   onProceedToCheckout,
+  isStoreOpen = true,
+  onStoreClosedClick,
 }: CartDrawerProps) {
   if (!isOpen) return null;
 
@@ -227,15 +231,27 @@ export default function CartDrawer({
 
             {/* Checkout CTA */}
             <button
-              onClick={onProceedToCheckout}
-              className="w-full flex items-center justify-between rounded-xl bg-green-500 hover:bg-green-600 text-white font-black text-sm p-4 shadow-md shadow-green-100 transition active:scale-95"
+              onClick={() => {
+                if (!isStoreOpen) {
+                  if (onStoreClosedClick) onStoreClosedClick();
+                  return;
+                }
+                onProceedToCheckout();
+              }}
+              className={`w-full flex items-center justify-between rounded-xl p-4 shadow-md transition active:scale-95 cursor-pointer ${
+                !isStoreOpen 
+                  ? "bg-gray-150 text-gray-400 border border-gray-200 shadow-none" 
+                  : "bg-green-500 hover:bg-green-600 text-white shadow-green-100"
+              }`}
             >
               <div>
-                <p className="text-[10px] text-green-100 font-bold uppercase tracking-wider text-left leading-none">PROCEED TO PAY</p>
-                <p className="text-base font-black">₹{grandTotal}</p>
+                <p className={`text-[10px] ${!isStoreOpen ? "text-gray-400" : "text-green-100"} font-bold uppercase tracking-wider text-left leading-none`}>
+                  {!isStoreOpen ? "STORE CLOSED" : "PROCEED TO PAY"}
+                </p>
+                <p className={`text-base font-black ${!isStoreOpen ? "text-gray-500" : ""}`}>₹{grandTotal}</p>
               </div>
               <div className="flex items-center space-x-1 font-black">
-                <span>Select Address & Pay</span>
+                <span>{!isStoreOpen ? "Fulfillment Offline" : "Select Address & Pay"}</span>
                 <ArrowRight className="h-4.5 w-4.5" />
               </div>
             </button>

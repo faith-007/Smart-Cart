@@ -243,7 +243,14 @@ export default function Header({
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-gray-800 capitalize">{addr.label}</span>
+                      <span className="font-bold text-gray-800 capitalize flex items-center space-x-1.5">
+                        <span>{addr.label}</span>
+                        {addr.serviceable === false && (
+                          <span className="text-[9px] bg-rose-50 border border-rose-200 text-rose-600 px-1.5 py-0.5 rounded-md font-extrabold select-none shrink-0">
+                            🔴 Out of Area
+                          </span>
+                        )}
+                      </span>
                       {currentAddress && currentAddress.id === addr.id && (
                         <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
                       )}
