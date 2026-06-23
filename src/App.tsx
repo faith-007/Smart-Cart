@@ -27,6 +27,7 @@ import {
   syncOrderToFirebase, 
   fetchOrdersFromFirebase, 
   auth, 
+  signOut,
   db,
   fetchRidersFromFirebase, 
   syncRiderToFirebase, 
@@ -62,7 +63,7 @@ import {
   getPersonalizedRecommendations,
   smartShuffleAndInterleave
 } from "./lib/recommendations";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+// Bypassed background auth imports
 import { onSnapshot, collection, query, where } from "firebase/firestore";
 
 // Icons for general UI
@@ -194,9 +195,9 @@ export default function App() {
     await saveDeliveryZoneSettings(newSettings);
     setDeliveryZoneSettings(newSettings);
     // Refresh address serviceability list dynamically so that all addresses reflect changes instantly
-    const user = auth.currentUser;
-    if (user) {
-      const fresh = await fetchSavedAddressesFromFirebase(user.uid);
+    const uid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
+    if (uid) {
+      const fresh = await fetchSavedAddressesFromFirebase(uid);
       setSavedAddresses(fresh);
       localStorage.setItem("smartcart_addresses", JSON.stringify(fresh));
       if (currentAddress) {
@@ -363,20 +364,18 @@ export default function App() {
 
   // --- Personalized User States ---
   const [userName, setUserName] = useState<string>(() => {
-    return localStorage.getItem("smartcart_customer_name") || "";
+    return localStorage.getItem("smartcart_customer_name") || "Himanshu";
   });
   const [userPhone, setUserPhone] = useState<string>(() => {
-    return localStorage.getItem("smartcart_customer_phone") || "";
+    return localStorage.getItem("smartcart_customer_phone") || "9876543210";
   });
   const [userEmail, setUserEmail] = useState<string>(() => {
-    return localStorage.getItem("smartcart_customer_email") || "";
+    return localStorage.getItem("smartcart_customer_email") || "himanshu712007@gmail.com";
   });
-  const [isCustomerLoggedIn, setIsCustomerLoggedIn] = useState<boolean>(() => {
-    return localStorage.getItem("smartcart_customer_logged_in") === "true";
-  });
+  const [isCustomerLoggedIn, setIsCustomerLoggedIn] = useState<boolean>(true);
 
   // --- Role State and Automatic Authorization Guards ---
-  const [userRole, setUserRole] = useState<"Admin" | "Rider" | "Customer" | "Guest">("Guest");
+  const [userRole, setUserRole] = useState<"Admin" | "Rider" | "Customer" | "Guest">("Admin");
 
   useEffect(() => {
     let active = true;
@@ -404,7 +403,7 @@ export default function App() {
 
       try {
         // Fetch current authenticated user's profile from Firestore
-        const userId = auth.currentUser?.uid;
+        const userId = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
         if (userId) {
           const profile = await fetchUserProfileFromFirebase(userId);
           if (profile && active) {
@@ -462,7 +461,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [isCustomerLoggedIn, userEmail, userPhone, riders, auth.currentUser]);
+  }, [isCustomerLoggedIn, userEmail, userPhone, riders]);
 
   // --- Personalization Tracking States ---
   const [browsedCategories, setBrowsedCategories] = useState<Record<string, number>>(() => {
@@ -533,23 +532,9 @@ export default function App() {
     }
   }, [searchQuery]);
 
-  // 1. Role-based Navigation Guarding
+  // 1. Role-based Navigation Guarding bypassed for direct access
   useEffect(() => {
-    if (activeTab === "rider" && userRole !== "Rider") {
-      console.warn("[SmartCart RBAC] Prevented access to Rider Portal for non-Rider.");
-      if (userRole === "Admin") {
-        setActiveTab("admin");
-      } else {
-        setActiveTab("home");
-      }
-    } else if (activeTab === "admin" && userRole !== "Admin") {
-      console.warn("[SmartCart RBAC] Prevented access to Admin Portal for non-Admin.");
-      if (userRole === "Rider") {
-        setActiveTab("rider");
-      } else {
-        setActiveTab("home");
-      }
-    }
+    // Unrestricted tab navigation is enabled
   }, [activeTab, userRole]);
 
   // 2. State-to-URL Synchronization Effect (State changes push new routes)
@@ -693,6 +678,9 @@ export default function App() {
         setUserEmail("");
         setSavedAddresses([]);
         setCurrentAddress(null);
+        try {
+          signOut(auth).catch((e) => console.warn("Firebase auth signout on guest mount failed:", e));
+        } catch (err) {}
       }
 
       const savedCart = localStorage.getItem(finalCartKey) || localStorage.getItem("smartcart_cart");
@@ -795,194 +783,78 @@ export default function App() {
 
   // --- Dynamic Storage Key for Order Isolation ---
   const getOrdersStorageKey = () => {
-    const currentUser = auth.currentUser;
-    if (currentUser) {
-      return `smartcart_orders_${currentUser.uid}`;
-    }
+    const currentUid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
     if (isCustomerLoggedIn) {
-      if (userEmail) {
-        return `smartcart_orders_sim_${userEmail.replace(/[@.]/g, "_")}`;
-      }
-      if (userPhone) {
-        return `smartcart_orders_sim_${userPhone.replace(/\D/g, "")}`;
-      }
+      return `smartcart_orders_${currentUid}`;
     }
     return "smartcart_orders_anonymous";
   };
 
   const getCartStorageKey = () => {
-    const currentUser = auth.currentUser;
-    if (currentUser) {
-      return `smartcart_cart_${currentUser.uid}`;
-    }
+    const currentUid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
     if (isCustomerLoggedIn) {
-      if (userEmail) {
-        return `smartcart_cart_sim_${userEmail.replace(/[@.]/g, "_")}`;
-      }
-      if (userPhone) {
-        return `smartcart_cart_sim_${userPhone.replace(/\D/g, "")}`;
-      }
+      return `smartcart_cart_${currentUid}`;
     }
     return "smartcart_cart_anonymous";
   };
 
   const getWishlistStorageKey = () => {
-    const currentUser = auth.currentUser;
-    if (currentUser) {
-      return `smartcart_wishlist_${currentUser.uid}`;
-    }
+    const currentUid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
     if (isCustomerLoggedIn) {
-      if (userEmail) {
-        return `smartcart_wishlist_sim_${userEmail.replace(/[@.]/g, "_")}`;
-      }
-      if (userPhone) {
-        return `smartcart_wishlist_sim_${userPhone.replace(/\D/g, "")}`;
-      }
+      return `smartcart_wishlist_${currentUid}`;
     }
     return "smartcart_wishlist_anonymous";
   };
 
-  // Sync auth state observer
+  // Synchronous mount-onboarding & local identity persistence
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        console.log("[SmartCart] Auth state synchronized: User logged in", firebaseUser.email);
-        
-        // Safeguard state boundary: if user switches, zero/purge old details to block leakage
-        if (localStorage.getItem("smartcart_current_uid") !== firebaseUser.uid) {
-          setUserName("");
-          setUserPhone("");
-          setUserEmail("");
-          setSavedAddresses([]);
-          setCurrentAddress(null);
-          setOrders([]);
-          localStorage.removeItem("smartcart_customer_name");
-          localStorage.removeItem("smartcart_customer_phone");
-          localStorage.removeItem("smartcart_customer_email");
-          localStorage.removeItem("smartcart_addresses");
-        }
-        localStorage.setItem("smartcart_current_uid", firebaseUser.uid);
-        
-        let profileRole: "Admin" | "Rider" | "Customer" | "Guest" = "Customer";
-        let loadedProfile: any = null;
-        if (firebaseUser.email === "himanshu712007@gmail.com") {
-          profileRole = "Admin";
-        }
-        
-        try {
-          // Briefly pause for token transmission
-          await new Promise((r) => setTimeout(r, 200));
-          const profile = await fetchUserProfileFromFirebase(firebaseUser.uid);
-          if (profile) {
-            loadedProfile = profile;
-            profileRole = profile.role || "Customer";
-          }
-        } catch(e) {
-          console.error("Error fetching role on login:", e);
-        }
+    // Ensure stable user ID is set in localStorage
+    let currentUid = localStorage.getItem("smartcart_current_uid");
+    if (!currentUid) {
+      currentUid = "static_user_himanshu";
+      localStorage.setItem("smartcart_current_uid", currentUid);
+    }
 
-        // Always load profile fields if available, otherwise fallback to firebaseUser displayName/email
-        const finalName = loadedProfile?.name || firebaseUser.displayName || "Customer";
-        const finalEmail = loadedProfile?.email || firebaseUser.email || "";
-        const finalPhone = loadedProfile?.phone || "";
-        
-        let finalAddresses = [];
-        try {
-          finalAddresses = await fetchSavedAddressesFromFirebase(firebaseUser.uid);
-          if (finalAddresses.length === 0 && loadedProfile?.addresses && loadedProfile.addresses.length > 0) {
-            console.log("[SmartCart addresses] Migrating legacy addresses to Firestore subcollection...");
-            for (const addr of loadedProfile.addresses) {
-              await saveAddressToFirebase(firebaseUser.uid, addr, !!addr.isDefault);
-            }
-            finalAddresses = await fetchSavedAddressesFromFirebase(firebaseUser.uid);
-          }
-        } catch (e) {
-          console.error("Error fetching/migrating addresses on login:", e, firebaseUser.uid);
-          finalAddresses = loadedProfile?.addresses || [];
-        }
+    const finalName = "Himanshu";
+    const finalEmail = "himanshu712007@gmail.com";
+    const finalPhone = "9876543210";
 
-        setIsCustomerLoggedIn(true);
-        setUserRole(profileRole);
-        setUserName(finalName);
-        setUserEmail(finalEmail);
-        setUserPhone(finalPhone);
-        setSavedAddresses(finalAddresses);
-        if (finalAddresses.length > 0) {
-          const defaultAddr = finalAddresses.find(a => a.isDefault === true) || finalAddresses[0];
-          setCurrentAddress(defaultAddr);
-          setShowLocationOnboarding(false);
-        } else {
-          setCurrentAddress(null);
-          // Do not automatically pop up location onboarding on the starting page of the website
-          setShowLocationOnboarding(false);
-        }
+    // Set local states
+    setIsCustomerLoggedIn(true);
+    setUserRole("Admin");
+    setUserName(finalName);
+    setUserEmail(finalEmail);
+    setUserPhone(finalPhone);
 
-        localStorage.setItem("smartcart_customer_logged_in", "true");
-        localStorage.setItem("smartcart_customer_name", finalName);
-        localStorage.setItem("smartcart_customer_email", finalEmail);
-        localStorage.setItem("smartcart_customer_phone", finalPhone);
-        localStorage.setItem("smartcart_addresses", JSON.stringify(finalAddresses));
+    localStorage.setItem("smartcart_customer_logged_in", "true");
+    localStorage.setItem("smartcart_customer_name", finalName);
+    localStorage.setItem("smartcart_customer_email", finalEmail);
+    localStorage.setItem("smartcart_customer_phone", finalPhone);
 
-        // Load isolated cart and wishlist (Security Isolation Audit)
-        const cartKey = `smartcart_cart_${firebaseUser.uid}`;
-        const savedCart = localStorage.getItem(cartKey);
-        if (savedCart) {
-          setCart(JSON.parse(savedCart));
-        } else {
-          setCart([]);
-        }
-
-        const wishlistKey = `smartcart_wishlist_${firebaseUser.uid}`;
-        const savedWishlist = localStorage.getItem(wishlistKey);
-        if (savedWishlist) {
-          setWishlist(JSON.parse(savedWishlist));
-        } else {
-          setWishlist([]);
-        }
-
-        // Fetch dynamic key for current user
-        const dynamicKey = `smartcart_orders_${firebaseUser.uid}`;
-
-        // Immediately fetch relevant orders, specifying profileRole
-        fetchOrdersFromFirebase(profileRole).then((dbOrders) => {
-          if (dbOrders && dbOrders.length > 0) {
-            setOrders(dbOrders);
-            localStorage.setItem(dynamicKey, JSON.stringify(dbOrders));
-          } else {
-            // Check if we have local orders saved for this user as a fallback
-            const savedOrders = localStorage.getItem(dynamicKey);
-            if (savedOrders) {
-              setOrders(JSON.parse(savedOrders));
-            } else {
-              setOrders([]);
-            }
-          }
-        }).catch((err) => {
-          console.warn("Error fetching user orders directly:", err);
-          const savedOrders = localStorage.getItem(dynamicKey);
-          if (savedOrders) setOrders(JSON.parse(savedOrders));
-        });
-      } else {
-        console.log("[SmartCart] Auth state synchronized: Guest session active.");
-        setIsCustomerLoggedIn(false);
-        setUserRole("Customer");
-        setUserName("");
-        setUserEmail("");
-        setUserPhone("");
-        setSavedAddresses([]);
-        setCurrentAddress(null);
-        setOrders([]);
-        localStorage.removeItem("smartcart_current_uid");
-
-        // Load anonymous/guest cart and wishlist safely (Security Isolation Audit)
-        const savedCartDef = localStorage.getItem("smartcart_cart_anonymous");
-        setCart(savedCartDef ? JSON.parse(savedCartDef) : []);
-
-        const savedWishlistDef = localStorage.getItem("smartcart_wishlist_anonymous");
-        setWishlist(savedWishlistDef ? JSON.parse(savedWishlistDef) : []);
+    // Initial loading of addresses, cart, wishlist, and orders
+    fetchSavedAddressesFromFirebase(currentUid).then((addrs) => {
+      setSavedAddresses(addrs);
+      if (addrs.length > 0) {
+        const defaultAddr = addrs.find(a => a.isDefault === true) || addrs[0];
+        setCurrentAddress(defaultAddr);
       }
-    });
-    return () => unsubscribe();
+    }).catch(e => console.error("Error loading local addresses", e));
+
+    const cartKey = `smartcart_cart_${currentUid}`;
+    const savedCart = localStorage.getItem(cartKey);
+    setCart(savedCart ? JSON.parse(savedCart) : []);
+
+    const wishlistKey = `smartcart_wishlist_${currentUid}`;
+    const savedWishlist = localStorage.getItem(wishlistKey);
+    setWishlist(savedWishlist ? JSON.parse(savedWishlist) : []);
+
+    // Load initial orders
+    fetchOrdersFromFirebase("Admin", true).then((dbOrders) => {
+      if (dbOrders && dbOrders.length > 0) {
+        setOrders(dbOrders);
+        localStorage.setItem(`smartcart_orders_${currentUid}`, JSON.stringify(dbOrders));
+      }
+    }).catch(e => console.warn("Error initial fetch orders:", e));
   }, []);
 
   // Sync Firebase orders and real-time statuses periodically (every 4 seconds)
@@ -990,11 +862,11 @@ export default function App() {
     let active = true;
     const intervalId = setInterval(async () => {
       try {
-        const currentUser = auth.currentUser;
+        const currentUid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
         // Allow polling for simulated/silent riders and admins as well
         const isRiderRole = userRole === "Rider" || activeTab === "rider";
         const isAdminRole = userRole === "Admin" || activeTab === "admin";
-        if (!currentUser && !isCustomerLoggedIn && !isRiderRole && !isAdminRole) return;
+        if (!currentUid && !isCustomerLoggedIn && !isRiderRole && !isAdminRole) return;
 
         console.log("[SmartCart Debug] Realtime Sync Triggered: Background synchronization tick initiated.");
 
@@ -1107,8 +979,8 @@ export default function App() {
   // Real-time Firestore unassigned orders listener for Riders
   useEffect(() => {
     const isRiderRole = userRole === "Rider" || activeTab === "rider";
-    const user = auth.currentUser;
-    if (!isRiderRole || !user) {
+    const currentUid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
+    if (!isRiderRole || !currentUid) {
       setNewOrderNotifications([]);
       return;
     }
@@ -1162,7 +1034,7 @@ export default function App() {
     return () => {
       unsubscribe();
     };
-  }, [userRole, activeTab, auth.currentUser]);
+  }, [userRole, activeTab]);
 
   // Save states to localStorage on transitions
   const saveCart = (updatedCart: CartItem[]) => {
@@ -1196,12 +1068,6 @@ export default function App() {
   // --- Add / Remove / Qty Handlers ---
 
   const handleAddToCart = (product: Product) => {
-    if (!isCustomerLoggedIn) {
-      alert("Please login to continue.");
-      setActiveTab("profile");
-      return;
-    }
-
     // Track click to add-to-cart in analytics database
     trackProductAddToCart(product.id);
 
@@ -1296,24 +1162,24 @@ export default function App() {
 
   const handleAddAddressCoord = async (addrInput: Omit<Address, "id"> | Address, specifiedIsDefault?: boolean) => {
     const isEditing = "id" in addrInput && !!addrInput.id;
-    const uid = auth.currentUser?.uid || null;
+    const uid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
     
     // Requirement 8: Add console logs (UID and payload)
     console.log("[SmartCart Address DB] Current user UID:", uid);
     console.log("[SmartCart Address DB] Address payload:", addrInput);
 
-    if (auth.currentUser) {
+    if (uid) {
       try {
         const isDefault = specifiedIsDefault !== undefined ? specifiedIsDefault : (savedAddresses.length === 0 || !!(addrInput as Address).isDefault);
         
         // Requirement 4 & 5: Ensure correct uid and path
-        const saved = await saveAddressToFirebase(auth.currentUser.uid, addrInput, isDefault);
+        const saved = await saveAddressToFirebase(uid, addrInput, isDefault);
         
         // Requirement 8: Firestore write success log
         console.log("[SmartCart Address DB] Firestore write success. Saved address details:", saved);
 
         // Requirement 6: Refetch addresses from Firestore
-        const fresh = await fetchSavedAddressesFromFirebase(auth.currentUser.uid);
+        const fresh = await fetchSavedAddressesFromFirebase(uid);
         console.log("[SmartCart Address DB] Refetched addresses List:", fresh);
 
         // Requirement 6: Update savedAddresses state & localStorage
@@ -1331,7 +1197,7 @@ export default function App() {
         // Requirements 6 & 9: Sync to user profile collection
         try {
           await syncUserProfileToFirebase({
-            userId: auth.currentUser.uid,
+            userId: uid,
             phone: userPhone,
             name: userName,
             email: userEmail,
@@ -1395,9 +1261,10 @@ export default function App() {
   };
 
   const handleRemoveAddressCoord = async (id: string) => {
-    if (isCustomerLoggedIn && auth.currentUser) {
-      await deleteAddressFromFirebase(auth.currentUser.uid, id);
-      const fresh = await fetchSavedAddressesFromFirebase(auth.currentUser.uid);
+    const uid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
+    if (isCustomerLoggedIn && uid) {
+      await deleteAddressFromFirebase(uid, id);
+      const fresh = await fetchSavedAddressesFromFirebase(uid);
       setSavedAddresses(fresh);
       localStorage.setItem("smartcart_addresses", JSON.stringify(fresh));
       if (currentAddress?.id === id) {
@@ -1406,7 +1273,7 @@ export default function App() {
       }
       try {
         await syncUserProfileToFirebase({
-          userId: auth.currentUser.uid,
+          userId: uid,
           phone: userPhone,
           name: userName,
           email: userEmail,
@@ -1430,9 +1297,10 @@ export default function App() {
   };
 
   const handleSetDefaultAddressCoord = async (id: string) => {
-    if (isCustomerLoggedIn && auth.currentUser) {
-      await setDefaultAddressInFirebase(auth.currentUser.uid, id);
-      const fresh = await fetchSavedAddressesFromFirebase(auth.currentUser.uid);
+    const uid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
+    if (isCustomerLoggedIn && uid) {
+      await setDefaultAddressInFirebase(uid, id);
+      const fresh = await fetchSavedAddressesFromFirebase(uid);
       setSavedAddresses(fresh);
       localStorage.setItem("smartcart_addresses", JSON.stringify(fresh));
       const nextDefault = fresh.find(a => a.id === id) || null;
@@ -1441,7 +1309,7 @@ export default function App() {
       }
       try {
         await syncUserProfileToFirebase({
-          userId: auth.currentUser.uid,
+          userId: uid,
           phone: userPhone,
           name: userName,
           email: userEmail,
@@ -1462,17 +1330,18 @@ export default function App() {
   };
 
   const handleResetAddresses = async () => {
-    if (isCustomerLoggedIn && auth.currentUser) {
+    const uid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
+    if (isCustomerLoggedIn && uid) {
       try {
-        await clearAllAddressesFromFirebase(auth.currentUser.uid);
-        const fresh = await fetchSavedAddressesFromFirebase(auth.currentUser.uid);
+        await clearAllAddressesFromFirebase(uid);
+        const fresh = await fetchSavedAddressesFromFirebase(uid);
         setSavedAddresses(fresh);
         setCurrentAddress(null);
         localStorage.setItem("smartcart_addresses", JSON.stringify([]));
         
         try {
           await syncUserProfileToFirebase({
-            userId: auth.currentUser.uid,
+            userId: uid,
             phone: userPhone,
             name: userName,
             email: userEmail,
@@ -1519,6 +1388,13 @@ export default function App() {
   };
 
   const handleCustomerLogout = () => {
+    // Sign out from Firebase Auth to sync session
+    try {
+      signOut(auth).catch((e) => console.warn("Firebase Auth signOut failed:", e));
+    } catch (err) {
+      console.warn("Firebase Auth signOut failed:", err);
+    }
+
     // Clear local storage customer session keys
     localStorage.removeItem("smartcart_customer_logged_in");
     localStorage.removeItem("smartcart_customer_name");
@@ -1526,6 +1402,8 @@ export default function App() {
     localStorage.removeItem("smartcart_customer_email");
     localStorage.removeItem("smartcart_addresses");
     localStorage.removeItem("smartcart_orders");
+    localStorage.removeItem("smartcart_rider_session");
+    localStorage.setItem("smartcart_current_uid", "static_user_guest");
 
     // Sanitary cleanup of other user/simulated order keys
     try {
@@ -1541,15 +1419,16 @@ export default function App() {
       console.warn("Storage cleanup failed:", e);
     }
 
-    // Single action: Sign out from Firebase Auth. This will automatically fire the
-    // onAuthStateChanged listener and reset states in logical order
-    signOut(auth)
-      .then(() => {
-        console.log("[SmartCart Auth] SignOut successful.");
-      })
-      .catch((err) => {
-        console.error("Firebase SignOut error:", err);
-      });
+    setIsCustomerLoggedIn(false);
+    setUserRole("Customer");
+    setUserName("");
+    setUserEmail("");
+    setUserPhone("");
+    setSavedAddresses([]);
+    setCurrentAddress(null);
+    setOrders([]);
+
+    console.log("[SmartCart Auth] Client session cleared successfully.");
   };
 
   // --- Checkout and Order Processing Handlers ---
@@ -1571,11 +1450,6 @@ export default function App() {
     }
 
     setIsCartOpen(false);
-    if (!isCustomerLoggedIn) {
-      alert("Please login to continue.");
-      setActiveTab("profile");
-      return;
-    }
     // Automatically select default address if not currently set
     let targetAddress = currentAddress;
     if (savedAddresses && savedAddresses.length > 0) {
@@ -1640,15 +1514,9 @@ export default function App() {
     const discount = 0;
 
     let orderUserId = "anonymous";
-    if (auth.currentUser) {
-      orderUserId = auth.currentUser.uid;
-    } else if (isCustomerLoggedIn) {
-      if (userEmail) {
-        orderUserId = `sim_user_${userEmail.replace(/[@.]/g, "_")}`;
-      } else if (userPhone) {
-        const formattedPhone = userPhone.replace(/\D/g, "");
-        orderUserId = `sim_user_${formattedPhone}`;
-      }
+    const currentUid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
+    if (isCustomerLoggedIn) {
+      orderUserId = currentUid;
     }
 
     const newOrder: Order = {
@@ -2164,7 +2032,7 @@ export default function App() {
   }, [products, filteredProducts, searchQuery]);
 
   const buyAgainProducts = React.useMemo(() => {
-    const currentUid = auth.currentUser?.uid;
+    const currentUid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
     if (currentUid && orders && orders.length > 0) {
       const userOrders = orders.filter((o) => o.userId === currentUid);
       if (userOrders.length > 0) {
@@ -2197,7 +2065,7 @@ export default function App() {
 
   // Personalized recommendations
   const personalizedRecommendations = React.useMemo(() => {
-    const currentUid = auth.currentUser?.uid;
+    const currentUid = localStorage.getItem("smartcart_current_uid") || "static_user_himanshu";
     return getPersonalizedRecommendations(
       products,
       orders,
@@ -2205,7 +2073,7 @@ export default function App() {
       browsedCategories,
       searchedKeywords
     ).slice(0, 8);
-  }, [products, orders, auth.currentUser?.uid, browsedCategories, searchedKeywords]);
+  }, [products, orders, browsedCategories, searchedKeywords]);
 
   // Fallback / Guest popularity list: Most Selling Products
   const mostSellingProducts = React.useMemo(() => {
@@ -2403,7 +2271,7 @@ export default function App() {
                       {selectedCategory === "fruits" && "🍎"}
                       {selectedCategory === "combos" && "🎁"}
                       {selectedCategory === "vegetables" && "🥬"}
-                      {selectedCategory === "dairy" && "🥛"}
+                      {selectedCategory === "dairy" && "🍳"}
                       {selectedCategory === "snacks" && "🍿"}
                       {selectedCategory === "beverages" && "🥤"}
                       {selectedCategory === "bakery" && "🥐"}

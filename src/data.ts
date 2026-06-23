@@ -4,7 +4,7 @@ export const INITIAL_CATEGORIES: Category[] = [
   { id: "fruits", name: "Fruits", iconName: "Apple" },
   { id: "combos", name: "Combo Deals", iconName: "Gift" },
   { id: "vegetables", name: "Vegetables", iconName: "Leaf" },
-  { id: "dairy", name: "Dairy & Eggs", iconName: "Milk" },
+  { id: "dairy", name: "Kitchen", iconName: "ChefHat" },
   { id: "snacks", name: "Snacks", iconName: "Cookie" },
   { id: "beverages", name: "Cold Drinks", iconName: "CupSoda" },
   { id: "bakery", name: "Bakery", iconName: "Croissant" },

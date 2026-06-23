@@ -37,7 +37,7 @@ export const db = (firebaseConfig as any).firestoreDatabaseId && (firebaseConfig
 console.log("[Inventory] Firestore Connected");
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
-export { signInWithPopup };
+export { signInWithPopup, signOut };
 
 // Error formats according to System Skill instructions
 export enum OperationType {
@@ -649,6 +649,21 @@ function mapDocToOrder(docSnapshot: any): Order {
  * Fetch all saved addresses for a user from Firestore under users/{userId}/addresses/{addressId}
  */
 export async function fetchSavedAddressesFromFirebase(userId: string): Promise<Address[]> {
+  const currentUser = auth.currentUser;
+  const isGuest = userId === "static_user_guest" || !userId || !currentUser;
+  if (isGuest) {
+    console.log("[SmartCart Firebase] Guest/simulated user addresses sync. Loading locally from localStorage.");
+    try {
+      const saved = localStorage.getItem("smartcart_addresses");
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.warn("[SmartCart Firebase] Error loading local addresses from localStorage:", e);
+    }
+    return [];
+  }
+
   const pathForList = `users/${userId}/addresses`;
   try {
     const settings = await fetchDeliveryZoneSettings();
@@ -709,6 +724,38 @@ export async function saveAddressToFirebase(
   isDefault = false
 ): Promise<Address> {
   const addressId = "id" in address && address.id ? address.id : `addr-${Date.now()}`;
+  const currentUser = auth.currentUser;
+  const isGuest = userId === "static_user_guest" || !userId || !currentUser;
+
+  if (isGuest) {
+    console.log("[SmartCart Firebase] Guest/simulated user addresses write. Skipping remote sync, returning formatted local object.");
+    const combinedAddressLine = "houseFlatNumber" in address && address.houseFlatNumber
+      ? `${address.houseFlatNumber}, ${address.street || ""}`
+      : address.addressLine || "";
+    return {
+      id: addressId,
+      label: (address.label || "Home") as "Home" | "Work" | "Other",
+      name: address.name || "",
+      addressLine: combinedAddressLine,
+      city: address.city || "",
+      pincode: address.pincode || "",
+      phone: address.phone || "",
+      isDefault: isDefault,
+      fullName: address.name || "",
+      phoneNumber: address.phone || "",
+      houseFlatNumber: "houseFlatNumber" in address ? (address as any).houseFlatNumber : "",
+      street: "street" in address ? (address as any).street : "",
+      landmark: "landmark" in address ? (address as any).landmark : "Home",
+      state: "state" in address ? (address as any).state : "",
+      createdAt: "createdAt" in address ? (address as any).createdAt : new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lat: address.lat,
+      lng: address.lng,
+      gpsAccuracy: address.gpsAccuracy,
+      serviceable: true,
+    };
+  }
+
   const pathForWrite = `users/${userId}/addresses/${addressId}`;
   try {
     const addressRef = doc(db, "users", userId, "addresses", addressId);
@@ -804,6 +851,13 @@ export async function saveAddressToFirebase(
  * Delete an address from Firestore
  */
 export async function deleteAddressFromFirebase(userId: string, addressId: string): Promise<void> {
+  const currentUser = auth.currentUser;
+  const isGuest = userId === "static_user_guest" || !userId || !currentUser;
+  if (isGuest) {
+    console.log("[SmartCart Firebase] Guest/simulated user addresses delete. Skipping remote sync.");
+    return;
+  }
+
   const pathForDelete = `users/${userId}/addresses/${addressId}`;
   try {
     const addressRef = doc(db, "users", userId, "addresses", addressId);
@@ -817,6 +871,13 @@ export async function deleteAddressFromFirebase(userId: string, addressId: strin
  * Set an address as default in Firestore and unset all other default addresses
  */
 export async function setDefaultAddressInFirebase(userId: string, addressId: string): Promise<void> {
+  const currentUser = auth.currentUser;
+  const isGuest = userId === "static_user_guest" || !userId || !currentUser;
+  if (isGuest) {
+    console.log("[SmartCart Firebase] Guest/simulated user addresses setDefault. Skipping remote sync.");
+    return;
+  }
+
   const pathForWrite = `users/${userId}/addresses/${addressId}`;
   try {
     const addressesRef = collection(db, "users", userId, "addresses");
@@ -843,6 +904,13 @@ export async function setDefaultAddressInFirebase(userId: string, addressId: str
  * Clear/reset all saved addresses for a user in Firestore
  */
 export async function clearAllAddressesFromFirebase(userId: string): Promise<void> {
+  const currentUser = auth.currentUser;
+  const isGuest = userId === "static_user_guest" || !userId || !currentUser;
+  if (isGuest) {
+    console.log("[SmartCart Firebase] Guest/simulated user addresses clearAll. Skipping remote sync.");
+    return;
+  }
+
   const pathForDelete = `users/${userId}/addresses`;
   try {
     const addressesRef = collection(db, "users", userId, "addresses");
@@ -1360,5 +1428,4 @@ export async function saveDeliveryZoneSettings(settings: DeliveryZoneSettings): 
     }
   }
 }
-
 
