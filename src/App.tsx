@@ -11,6 +11,7 @@ import MobilePromoBanner from "./components/MobilePromoBanner";
 import Categories from "./components/Categories";
 import ProductCard from "./components/ProductCard";
 import PetProductRequest from "./components/PetProductRequest";
+import ProductRequestBanner from "./components/ProductRequestBanner";
 import ProductDetailsModal from "./components/ProductDetailsModal";
 import CartDrawer from "./components/CartDrawer";
 import CheckoutModal from "./components/CheckoutModal";
@@ -79,6 +80,19 @@ export default function App() {
   const [shuffledProductIds, setShuffledProductIds] = useState<string[]>([]);
   const hasInitializedShuffleRef = useRef<boolean>(false);
   const [combos, setCombos] = useState<ComboDeal[]>([]);
+
+  // Dynamically sort categories by item count (descending order)
+  const sortedCategories = React.useMemo(() => {
+    return [...INITIAL_CATEGORIES].sort((a, b) => {
+      const countA = a.id === "combos"
+        ? combos.length
+        : products.filter((p) => p.category === a.id).length;
+      const countB = b.id === "combos"
+        ? combos.length
+        : products.filter((p) => p.category === b.id).length;
+      return countB - countA;
+    });
+  }, [products, combos]);
 
   // Calculate stable random shuffle with category interleaving ONCE on initial load
   useEffect(() => {
@@ -2336,7 +2350,7 @@ export default function App() {
 
             {/* Shop Categories horizontal filter ribbon */}
             <Categories
-              categories={INITIAL_CATEGORIES}
+              categories={sortedCategories}
               selectedCategory={selectedCategory}
               onSelectCategory={(catId) => {
                 setSelectedCategory(catId);
@@ -2353,6 +2367,13 @@ export default function App() {
             {/* Show Mobile Promo Banner ONLY if no category filter or search active */}
             {!selectedCategory && searchQuery.trim() === "" && (
               <MobilePromoBanner />
+            )}
+
+            {/* Product Request Banner */}
+            {!selectedCategory && searchQuery.trim() === "" && (
+              <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-4">
+                <ProductRequestBanner />
+              </div>
             )}
 
             {/* Active Query Ribbon information widget */}

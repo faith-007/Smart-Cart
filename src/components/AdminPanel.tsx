@@ -22,7 +22,9 @@ import {
   LogOut,
   RefreshCw,
   Clock,
-  Settings
+  Settings,
+  Search,
+  X
 } from "lucide-react";
 import { Product, Order, Rider, ComboDeal } from "../types";
 import { INITIAL_CATEGORIES } from "../data";
@@ -74,7 +76,21 @@ export default function AdminPanel({
 }: AdminPanelProps) {
   // --- Admin Navigation & Auth States ---
   const [adminTab, setAdminTab] = useState<"kpis" | "products" | "combos" | "orders" | "riders" | "users" | "settings">("kpis");
+  const [inventorySearchQuery, setInventorySearchQuery] = useState("");
   const isLoggedIn = isCustomerLoggedIn && userEmail === "himanshu712007@gmail.com";
+
+  // Filter products for inventory based on search query
+  const filteredInventoryProducts = React.useMemo(() => {
+    if (!inventorySearchQuery.trim()) return products;
+    const queryLower = inventorySearchQuery.toLowerCase().trim();
+    return products.filter((p) => {
+      const nameMatch = p.name?.toLowerCase().includes(queryLower);
+      const brandMatch = p.brand?.toLowerCase().includes(queryLower);
+      const categoryMatch = p.category?.toLowerCase().includes(queryLower);
+      const idMatch = p.id?.toLowerCase().includes(queryLower);
+      return nameMatch || brandMatch || categoryMatch || idMatch;
+    });
+  }, [products, inventorySearchQuery]);
 
   // --- Real-Time Logged-In User Monitoring state ---
   const [userProfiles, setUserProfiles] = useState<UserProfileData[]>([]);
@@ -132,8 +148,21 @@ export default function AdminPanel({
   const [comboImage, setComboImage] = useState("");
   const [comboDescription, setComboDescription] = useState("");
   const [selectedComboProductIds, setSelectedComboProductIds] = useState<string[]>([]);
+  const [comboProductSearchQuery, setComboProductSearchQuery] = useState("");
   const [comboError, setComboError] = useState("");
   const [comboSuccess, setComboSuccess] = useState("");
+
+  const filteredComboProducts = React.useMemo(() => {
+    if (!comboProductSearchQuery.trim()) return products;
+    const queryLower = comboProductSearchQuery.toLowerCase().trim();
+    return products.filter((p) => {
+      const nameMatch = p.name?.toLowerCase().includes(queryLower);
+      const brandMatch = p.brand?.toLowerCase().includes(queryLower);
+      const categoryMatch = p.category?.toLowerCase().includes(queryLower);
+      const idMatch = p.id?.toLowerCase().includes(queryLower);
+      return nameMatch || brandMatch || categoryMatch || idMatch;
+    });
+  }, [products, comboProductSearchQuery]);
 
   const computedOriginalPrice = selectedComboProductIds.reduce((acc, id) => {
     const prd = products.find((p) => p.id === id);
@@ -200,6 +229,7 @@ export default function AdminPanel({
       setComboImage("");
       setComboDescription("");
       setSelectedComboProductIds([]);
+      setComboProductSearchQuery("");
     } catch (err: any) {
       setComboError("Failed to save combo: " + err.message);
     }
@@ -766,8 +796,40 @@ export default function AdminPanel({
           {/* Fulfillment table */}
           <div className="md:col-span-2 bg-white border border-gray-150 rounded-3xl p-5 shadow-xs flex flex-col justify-between">
             <div>
-              <h3 className="text-sm font-black text-gray-950 uppercase tracking-wider mb-1">Fulfillment Registry</h3>
-              <p className="text-xs text-gray-400 font-semibold mb-4 leading-none">{products.length} active items logged in memory</p>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
+                <div>
+                  <h3 className="text-sm font-black text-gray-950 uppercase tracking-wider mb-1">Fulfillment Registry</h3>
+                  <p className="text-xs text-gray-400 font-semibold leading-none">
+                    {inventorySearchQuery.trim()
+                      ? `${filteredInventoryProducts.length} of ${products.length} items found`
+                      : `${products.length} active items logged in memory`
+                    }
+                  </p>
+                </div>
+
+                {/* Inventory Search Bar */}
+                <div className="relative w-full sm:w-64">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                    <Search className="h-4 w-4 text-gray-400" />
+                  </span>
+                  <input
+                    type="text"
+                    value={inventorySearchQuery}
+                    onChange={(e) => setInventorySearchQuery(e.target.value)}
+                    placeholder="Search name, brand, category..."
+                    className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-8 py-1.5 text-xs font-medium placeholder-gray-400 outline-none focus:ring-1 focus:ring-orange-500 transition-all"
+                  />
+                  {inventorySearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setInventorySearchQuery("")}
+                      className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-gray-400 hover:text-gray-600 transition"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
               
               <div className="overflow-x-auto max-h-[460px] overflow-y-auto pr-1">
                 <table className="w-full text-left text-xs border-collapse">
@@ -780,63 +842,71 @@ export default function AdminPanel({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {products.map((p) => {
-                      const isLow = p.stock <= 15;
-                      return (
-                        <tr key={p.id} className="hover:bg-gray-50/50 transition">
-                          <td className="py-2.5 pl-1">
-                            <div className="flex items-center space-x-2.5">
-                              <img src={p.image} alt={p.name} className="h-8 w-8 rounded-lg object-cover bg-gray-50" />
-                              <div>
-                                <p className="font-bold text-gray-800 truncate max-w-[170px]">{p.name}</p>
-                                <p className="text-[9px] text-gray-400 font-semibold uppercase">{p.brand} • {p.category}</p>
+                    {filteredInventoryProducts.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="py-10 text-center text-gray-400 font-medium">
+                          No products match your search. Try adjusting the query.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredInventoryProducts.map((p) => {
+                        const isLow = p.stock <= 15;
+                        return (
+                          <tr key={p.id} className="hover:bg-gray-50/50 transition">
+                            <td className="py-2.5 pl-1">
+                              <div className="flex items-center space-x-2.5">
+                                <img src={p.image} alt={p.name} className="h-8 w-8 rounded-lg object-cover bg-gray-50" />
+                                <div>
+                                  <p className="font-bold text-gray-800 truncate max-w-[170px]">{p.name}</p>
+                                  <p className="text-[9px] text-gray-400 font-semibold uppercase">{p.brand} • {p.category}</p>
+                                </div>
                               </div>
-                            </div>
-                          </td>
+                            </td>
 
-                          <td className="py-2.5">
-                            <div className="flex flex-col text-left text-[11px]">
-                              <span className="font-bold text-gray-800">₹{p.sellingPrice}</span>
-                              <span className="text-[9px] text-gray-400 line-through">₹{p.marketPrice}</span>
-                            </div>
-                          </td>
+                            <td className="py-2.5">
+                              <div className="flex flex-col text-left text-[11px]">
+                                <span className="font-bold text-gray-800">₹{p.sellingPrice}</span>
+                                <span className="text-[9px] text-gray-400 line-through">₹{p.marketPrice}</span>
+                              </div>
+                            </td>
 
-                          <td className="py-2.5">
-                            <div className="flex items-center space-x-2">
-                              <input
-                                type="number"
-                                className={`w-14 rounded-lg bg-gray-100 p-1 text-center font-bold text-xs border border-transparent outline-none ${
-                                  isLow ? "text-red-500 font-black animate-pulse bg-red-50" : "text-gray-800"
-                                }`}
-                                value={p.stock}
-                                onChange={(e) => onUpdateStock(p.id, Math.max(0, parseInt(e.target.value) || 0))}
-                              />
-                              <span className="text-[9px] text-gray-400 font-bold uppercase leading-none">Units</span>
-                            </div>
-                          </td>
+                            <td className="py-2.5">
+                              <div className="flex items-center space-x-2">
+                                <input
+                                  type="number"
+                                  className={`w-14 rounded-lg bg-gray-100 p-1 text-center font-bold text-xs border border-transparent outline-none ${
+                                    isLow ? "text-red-500 font-black animate-pulse bg-red-50" : "text-gray-800"
+                                  }`}
+                                  value={p.stock}
+                                  onChange={(e) => onUpdateStock(p.id, Math.max(0, parseInt(e.target.value) || 0))}
+                                />
+                                <span className="text-[9px] text-gray-400 font-bold uppercase leading-none">Units</span>
+                              </div>
+                            </td>
 
-                          <td className="py-2.5 text-right pr-2">
-                            <div className="flex items-center justify-end space-x-1.5">
-                              <button
-                                onClick={() => handleOpenEditProduct(p)}
-                                className="text-orange-600 hover:bg-orange-50 border border-orange-200/50 hover:border-orange-200 p-1.5 px-2.5 rounded-xl transition flex items-center gap-1 text-[10px] font-black uppercase tracking-wider cursor-pointer bg-orange-50/20"
-                                title="Edit Item"
-                              >
-                                <span>✏️</span>
-                                <span>Edit</span>
-                              </button>
-                              <button
-                                onClick={() => onDeleteProduct(p.id)}
-                                className="text-red-500 hover:bg-red-50 p-1.5 rounded-xl transition border border-gray-100 hover:border-red-200 cursor-pointer"
-                                title="Delete Item"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            <td className="py-2.5 text-right pr-2">
+                              <div className="flex items-center justify-end space-x-1.5">
+                                <button
+                                  onClick={() => handleOpenEditProduct(p)}
+                                  className="text-orange-600 hover:bg-orange-50 border border-orange-200/50 hover:border-orange-200 p-1.5 px-2.5 rounded-xl transition flex items-center gap-1 text-[10px] font-black uppercase tracking-wider cursor-pointer bg-orange-50/20"
+                                  title="Edit Item"
+                                >
+                                  <span>✏️</span>
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  onClick={() => onDeleteProduct(p.id)}
+                                  className="text-red-500 hover:bg-red-50 p-1.5 rounded-xl transition border border-gray-100 hover:border-red-200 cursor-pointer"
+                                  title="Delete Item"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -2138,30 +2208,60 @@ export default function AdminPanel({
                   <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-1">
                     Select Products (Must pick 2 or more) *
                   </label>
+
+                  {/* Combo Product Select Search Bar */}
+                  <div className="relative mb-2 w-full">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                      <Search className="h-3.5 w-3.5 text-gray-400" />
+                    </span>
+                    <input
+                      type="text"
+                      value={comboProductSearchQuery}
+                      onChange={(e) => setComboProductSearchQuery(e.target.value)}
+                      placeholder="Search name, brand, category..."
+                      className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-8 py-1.5 text-xs font-semibold placeholder-gray-400 outline-none focus:ring-1 focus:ring-rose-500 transition-all"
+                    />
+                    {comboProductSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setComboProductSearchQuery("")}
+                        className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-gray-400 hover:text-gray-600 transition"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+
                   <div className="border border-gray-155 rounded-xl bg-gray-50/55 p-3 max-h-[160px] overflow-y-auto space-y-2">
-                    {products.map((p) => {
-                      const isChecked = selectedComboProductIds.includes(p.id);
-                      return (
-                        <label key={p.id} className="flex items-center space-x-2 p-2 hover:bg-gray-100 rounded-lg cursor-pointer transition">
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => {
-                              setSelectedComboProductIds((prev) =>
-                                isChecked ? prev.filter((id) => id !== p.id) : [...prev, p.id]
-                              );
-                            }}
-                            className="h-4 w-4 text-rose-600 focus:ring-rose-500 rounded border-gray-300"
-                          />
-                          <div className="flex gap-2 items-center text-xs">
-                            <img src={p.image} className="h-6 w-6 rounded object-cover shrink-0" referrerPolicy="no-referrer" />
-                            <span className="font-extrabold text-gray-800 truncate max-w-[120px]">{p.name}</span>
-                            <span className="text-gray-400 font-bold">•</span>
-                            <span className="text-green-600 font-extrabold">₹{p.sellingPrice}</span>
-                          </div>
-                        </label>
-                      );
-                    })}
+                    {filteredComboProducts.length === 0 ? (
+                      <p className="text-center py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">
+                        No products found
+                      </p>
+                    ) : (
+                      filteredComboProducts.map((p) => {
+                        const isChecked = selectedComboProductIds.includes(p.id);
+                        return (
+                          <label key={p.id} className="flex items-center space-x-2 p-2 hover:bg-gray-100 rounded-lg cursor-pointer transition">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                setSelectedComboProductIds((prev) =>
+                                  isChecked ? prev.filter((id) => id !== p.id) : [...prev, p.id]
+                                );
+                              }}
+                              className="h-4 w-4 text-rose-600 focus:ring-rose-500 rounded border-gray-300"
+                            />
+                            <div className="flex gap-2 items-center text-xs">
+                              <img src={p.image} className="h-6 w-6 rounded object-cover shrink-0" referrerPolicy="no-referrer" />
+                              <span className="font-extrabold text-gray-800 truncate max-w-[120px]">{p.name}</span>
+                              <span className="text-gray-400 font-bold">•</span>
+                              <span className="text-green-600 font-extrabold">₹{p.sellingPrice}</span>
+                            </div>
+                          </label>
+                        );
+                      })
+                    )}
                   </div>
                 </div>
 
@@ -2200,6 +2300,7 @@ export default function AdminPanel({
                         setComboImage("");
                         setComboDescription("");
                         setSelectedComboProductIds([]);
+                        setComboProductSearchQuery("");
                         setComboError("");
                         setComboSuccess("");
                       }}
