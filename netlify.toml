@@ -4,6 +4,12 @@
   functions = "netlify/functions"
 
 [[redirects]]
+  from = "https://smartcartgola.netlify.app/*"
+  to = "https://smartcartgola.in/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
