@@ -1,5 +1,29 @@
 {
   "entities": {
+    "OTPVerification": {
+      "title": "OTP Verification Code",
+      "description": "Secure transient verification codes generated on the server",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Unique user email address"
+        },
+        "otp": {
+          "type": "string",
+          "description": "Random 6-digit numeric security token"
+        },
+        "expiresAt": {
+          "type": "number",
+          "description": "Epoch timestamp indicating when token becomes invalid"
+        },
+        "verified": {
+          "type": "boolean",
+          "description": "Whether this security verification was successfully finalized"
+        }
+      },
+      "required": ["email", "otp", "expiresAt", "verified"]
+    },
     "UserProfile": {
       "title": "User Profile",
       "description": "Information stored for each registered customer",
@@ -277,6 +301,10 @@
     }
   },
   "firestore": {
+    "/otps/{email}": {
+      "schema": "OTPVerification",
+      "description": "Server-managed collection of transaction security authentication OTPs"
+    },
     "/profiles/{userId}": {
       "schema": "UserProfile",
       "description": "Collection storing basic user profiles keyed by their Firebase Auth UID"

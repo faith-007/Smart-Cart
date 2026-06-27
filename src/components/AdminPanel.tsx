@@ -278,7 +278,8 @@ export default function AdminPanel({
   }, [adminTab, isLoggedIn]);
 
   const handleLogout = () => {
-    localStorage.removeItem("smartcart_admin_logged_in");
+    console.log("[AdminPanel] Logout button clicked");
+    console.log("[AdminPanel] Logout function started");
     if (onCustomerLogout) {
       onCustomerLogout();
     }
@@ -2048,7 +2049,7 @@ export default function AdminPanel({
                       const liveOrdersCount = matchingOrders.filter(o => o.status !== "delivered").length;
 
                       return (
-                        <tr key={p.phone || idx} className="hover:bg-gray-50/50 transition">
+                        <tr key={p.userId || p.email || `profile-${idx}`} className="hover:bg-gray-50/50 transition">
                           <td className="py-3 pr-2">
                             <div className="flex items-center space-x-2.5">
                               <div className="h-7 w-7 rounded-lg bg-orange-105 text-orange-705 flex items-center justify-center font-black text-xs shrink-0 border border-orange-100">

@@ -1533,36 +1533,102 @@ export default function App() {
   };
 
   const handleCustomerLogout = () => {
-    // Clear local storage customer session keys
-    localStorage.removeItem("smartcart_customer_logged_in");
-    localStorage.removeItem("smartcart_customer_name");
-    localStorage.removeItem("smartcart_customer_phone");
-    localStorage.removeItem("smartcart_customer_email");
-    localStorage.removeItem("smartcart_addresses");
-    localStorage.removeItem("smartcart_orders");
+    // 1. Log: Logout button clicked
+    console.log("Logout button clicked");
 
-    // Sanitary cleanup of other user/simulated order keys
+    // 2. Log: Logout function started
+    console.log("Logout function started");
+
     try {
+      // Clear local storage customer, rider, and admin session keys
+      localStorage.removeItem("smartcart_customer_logged_in");
+      localStorage.removeItem("smartcart_customer_name");
+      localStorage.removeItem("smartcart_customer_phone");
+      localStorage.removeItem("smartcart_customer_email");
+      localStorage.removeItem("smartcart_addresses");
+      localStorage.removeItem("smartcart_orders");
+      localStorage.removeItem("smartcart_rider_session");
+      localStorage.removeItem("smartcart_admin_logged_in");
+      localStorage.removeItem("smartcart_current_uid");
+
+      // Sanitary cleanup of other user/simulated order keys
       const keysToRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
-        if (key && (key.startsWith("smartcart_orders_") || key.startsWith("smartcart_addresses_"))) {
+        if (key && (
+          key.startsWith("smartcart_orders_") || 
+          key.startsWith("smartcart_addresses_") || 
+          key.startsWith("smartcart_cart_") || 
+          key.startsWith("smartcart_wishlist_")
+        )) {
           keysToRemove.push(key);
         }
       }
       keysToRemove.forEach((key) => localStorage.removeItem(key));
-    } catch (e) {
-      console.warn("Storage cleanup failed:", e);
+    } catch (e: any) {
+      console.error("Error clearing local storage:", e);
     }
 
-    // Single action: Sign out from Firebase Auth. This will automatically fire the
-    // onAuthStateChanged listener and reset states in logical order
+    // 3. Log: Local storage cleared
+    console.log("Local storage cleared");
+
+    try {
+      sessionStorage.clear();
+    } catch (e: any) {
+      console.error("Error clearing session storage:", e);
+    }
+
+    // 4. Log: Session storage cleared
+    console.log("Session storage cleared");
+
+    // Put rider off-duty on logout as a safety measure if they are logged in
+    if (riderSession) {
+      try {
+        setRiders((prev) => {
+          const updated = prev.map((r) => r.id === riderSession.id ? { ...r, isActiveOnDuty: false } : r);
+          localStorage.setItem("smartcart_riders_db", JSON.stringify(updated));
+          return updated;
+        });
+      } catch (e: any) {
+        console.error("Error putting rider off-duty:", e);
+      }
+    }
+
+    // 5. Update React state immediately so UI updates without refreshing
+    setIsCustomerLoggedIn(false);
+    setUserRole("Customer");
+    setUserName("");
+    setUserEmail("");
+    setUserPhone("");
+    setSavedAddresses([]);
+    setCurrentAddress(null);
+    setOrders([]);
+    setRiderSession(null);
+
+    // Load guest/anonymous cart & wishlist
+    const savedCartDef = localStorage.getItem("smartcart_cart_anonymous");
+    setCart(savedCartDef ? JSON.parse(savedCartDef) : []);
+    const savedWishlistDef = localStorage.getItem("smartcart_wishlist_anonymous");
+    setWishlist(savedWishlistDef ? JSON.parse(savedWishlistDef) : []);
+
+    // 6. Log: Authentication state updated
+    console.log("Authentication state updated");
+
+    // 7. Redirect to home page
+    setActiveTab("home");
+
+    // 8. Log: Redirect completed
+    console.log("Redirect completed");
+
+    // 9. Call Firebase Auth sign out method
     signOut(auth)
       .then(() => {
-        console.log("[SmartCart Auth] SignOut successful.");
+        // 10. Log: Firebase sign-out completed
+        console.log("Firebase sign-out completed");
       })
       .catch((err) => {
-        console.error("Firebase SignOut error:", err);
+        // 11. Error handling: Log complete error instead of failing silently
+        console.error("Error occurred during logout:", err);
       });
   };
 
@@ -2802,6 +2868,7 @@ export default function App() {
               onPassOrder={handlePassOrder}
               riderSession={riderSession}
               setRiderSession={setRiderSession}
+              onCustomerLogout={handleCustomerLogout}
             />
           </>
         )}

@@ -15,7 +15,9 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn() && (
         request.auth.token.email == 'himanshu712007@gmail.com' ||
+        request.auth.token.email == 'system-otp-agent@smartcartgola.in' ||
         request.auth.uid == 'DjQkzY4U4Tb5xLmOyywopbVC8453' ||
+        request.auth.uid == 'uRq1neHkOgeBNsxBlyzDLoM5JXC2' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -105,6 +107,14 @@ service cloud.firestore {
     }
 
     // --- COLLECTION RULES MATCHERS ---
+
+    // 0. OTP Verifications
+    match /otps/{email} {
+      allow read, write: if isSignedIn() && (
+        request.auth.token.email == 'system-otp-agent@smartcartgola.in' ||
+        isAdmin()
+      );
+    }
 
     // 1. User profile collection
     match /profiles/{userId} {

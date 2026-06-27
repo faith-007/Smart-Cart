@@ -39,6 +39,7 @@ interface RiderDashboardProps {
   onPassOrder: (orderId: string, riderId: string) => void;
   riderSession: Rider | null;
   setRiderSession: React.Dispatch<React.SetStateAction<Rider | null>>;
+  onCustomerLogout: () => void;
 }
 
 export function getOrderGridCoordinates(addressLine: string, orderId: string) {
@@ -79,6 +80,7 @@ export default function RiderDashboard({
   onPassOrder,
   riderSession,
   setRiderSession,
+  onCustomerLogout,
 }: RiderDashboardProps) {
   // Login Form States
   const [loginPhone, setLoginPhone] = useState("");
@@ -385,24 +387,19 @@ export default function RiderDashboard({
   };
 
   const handleLogout = () => {
+    console.log("[RiderDashboard] Logout button clicked");
+    console.log("[RiderDashboard] Logout function started");
+
     if (watchId !== null) {
       navigator.geolocation.clearWatch(watchId);
       setWatchId(null);
     }
 
-    if (riderSession) {
-      // Put rider off-duty on logout as a safety measure
-      setRiders((prev) => {
-        const updated = prev.map((r) => r.id === riderSession.id ? { ...r, isActiveOnDuty: false } : r);
-        localStorage.setItem("smartcart_riders_db", JSON.stringify(updated));
-        return updated;
-      });
-    }
-
-    setRiderSession(null);
-    localStorage.removeItem("smartcart_rider_session");
     setIsAutoDriving(false);
     setSimulatedPathPercent(0);
+
+    // Delegate to unified, single logout function in App.tsx
+    onCustomerLogout();
   };
 
   // Delivery Requests operations (Accept offer)
