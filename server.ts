@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import fs from "fs";
-import { Resend } from "resend";
 import nodemailer from "nodemailer";
 import admin from "firebase-admin";
 import { initializeApp } from "firebase/app";
@@ -115,40 +114,40 @@ async function ensureServerAuthenticated() {
   }
 }
 
-// 3. Reusable Resend Email Service
-async function sendResendEmail({ to, subject, html, text }: { to: string; subject: string; html: string; text: string }) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    console.warn("[SmartCart Resend Warning] RESEND_API_KEY is not set. Real email sending is skipped.");
-    return { id: "mock-id-no-api-key" };
-  }
+// 3. Reusable SMTP Email Service (Single transporter reused when available)
+let smtpTransporter: any = null;
 
-  const resend = new Resend(apiKey);
-  console.log(`[SmartCart Resend] Dispatching email to ${to} using custom domain sender: "SmartCart <noreply@smartcartgola.in>"`);
-  const response = await resend.emails.send({
-    from: "SmartCart <noreply@smartcartgola.in>",
-    to: [to],
-    subject,
-    html,
-    text
-  });
+function getSmtpTransporter() {
+  if (smtpTransporter) return smtpTransporter;
 
-  if (response.error) {
-    console.error("[SmartCart Resend SDK Error] Failed to send email:", response.error);
-    throw new Error(response.error.message || "Resend API returned an error");
-  }
-
-  return response.data;
-}
-
-// 3b. Reusable SMTP Email Service for Orders only
-async function sendSmtpEmail({ to, subject, html, text }: { to: string; subject: string; html: string; text: string }) {
   const host = process.env.SMTP_HOST;
   const port = parseInt(process.env.SMTP_PORT || "587", 10);
   const secure = process.env.SMTP_SECURE === "true";
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-  const from = process.env.SMTP_FROM || "SmartCart Order Services <orders@smartcartgola.in>";
+
+  if (!host || !user || !pass) {
+    return null;
+  }
+
+  smtpTransporter = nodemailer.createTransport({
+    host,
+    port,
+    secure,
+    auth: {
+      user,
+      pass
+    }
+  });
+  return smtpTransporter;
+}
+
+async function sendSmtpEmail({ to, subject, html, text, from }: { to: string; subject: string; html: string; text: string; from?: string }) {
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const defaultFrom = process.env.SMTP_FROM || "SmartCart Services <noreply@smartcartgola.in>";
+  const sender = from || defaultFrom;
 
   if (!host || !user || !pass) {
     console.warn("[SmartCart SMTP Warning] SMTP is not fully configured (SMTP_HOST, SMTP_USER, SMTP_PASS are missing). Real SMTP email sending is skipped.");
@@ -156,26 +155,21 @@ async function sendSmtpEmail({ to, subject, html, text }: { to: string; subject:
   }
 
   try {
-    const transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: {
-        user,
-        pass
-      }
-    });
+    const transporter = getSmtpTransporter();
+    if (!transporter) {
+      throw new Error("SMTP Transporter failed to initialize");
+    }
 
-    console.log(`[SmartCart SMTP] Dispatching order email to ${to} using SMTP host: ${host}`);
+    console.log(`[SmartCart SMTP] Dispatching email to ${to} using SMTP host: ${host}`);
     const info = await transporter.sendMail({
-      from,
+      from: sender,
       to,
       subject,
       html,
       text
     });
 
-    console.log(`[SmartCart SMTP Success] Order email successfully dispatched to ${to}. MessageId: ${info.messageId}`);
+    console.log(`[SmartCart SMTP Success] Email successfully dispatched to ${to}. MessageId: ${info.messageId}`);
     return info;
   } catch (error: any) {
     console.error(`[SmartCart SMTP Error] Failed to send SMTP email to ${to}:`, error?.message || error);
@@ -197,7 +191,7 @@ interface OTPMemoryEntry {
 }
 const otpMemoryStore = new Map<string, OTPMemoryEntry>();
 
-// Secure route to generate and dispatch OTP code during user registration using Resend and direct in-memory store
+// Secure route to generate and dispatch OTP code during user registration using SMTP and direct in-memory store
 apiRouter.post("/send-otp", async (req, res) => {
   const { email, name, isResend } = req.body;
 
@@ -246,8 +240,8 @@ apiRouter.post("/send-otp", async (req, res) => {
     console.log(`Expires:  ${new Date(expiresAt).toISOString()}`);
     console.log(`======================================================\n`);
 
-    // STEP 5 Log: Call Resend API
-    console.log(`[SmartCart OTP Flow] [STEP 5] Call Resend API: Dispatching email to "${emailKey}"...`);
+    // STEP 5 Log: Call SMTP
+    console.log(`[SmartCart OTP Flow] [STEP 5] Call SMTP: Dispatching email to "${emailKey}"...`);
     const templateTitle = "SmartCart Verification OTP";
     
     const rawBody = `Welcome to Smart Cart.
@@ -376,16 +370,17 @@ Our Team`;
 </html>
 `;
 
-    // 4. Send email using Resend
-    await sendResendEmail({
+    // 4. Send email using SMTP
+    await sendSmtpEmail({
       to: emailKey,
       subject: templateTitle,
       html: htmlContent,
-      text: rawBody
+      text: rawBody,
+      from: "SmartCart Security <noreply@smartcartgola.in>"
     });
 
     // STEP 6 Log: Success
-    console.log(`[SmartCart OTP Flow] [STEP 6] Success: Verification OTP email successfully dispatched via Resend to "${emailKey}".`);
+    console.log(`[SmartCart OTP Flow] [STEP 6] Success: Verification OTP email successfully dispatched via SMTP to "${emailKey}".`);
     return res.json({ 
       success: true, 
       message: "OTP sent successfully"
@@ -395,18 +390,6 @@ Our Team`;
     // STEP 7 Log: Failure
     console.error(`[SmartCart OTP Flow] [STEP 7] [FAILURE] Failed to dispatch OTP for ${emailKey}:`, error?.message || error);
     
-    // Fallback: If Resend sandbox domain restriction is active, we return success but also provide guidance
-    const isSandboxError = error?.message?.includes("testing emails") || error?.message?.includes("resend.com/domains");
-    if (isSandboxError) {
-      console.warn(`[SmartCart OTP Flow] [SANDBOX] Resend Sandbox mode fallback engaged. OTP: ${generatedOtp}`);
-      return res.json({
-        success: true,
-        message: "OTP generated. Note: Resend is in Sandbox mode. Please retrieve the OTP from server logs.",
-        sandbox: true,
-        otp: generatedOtp // only in sandbox error case for seamless testing
-      });
-    }
-
     return res.json({ 
       success: false, 
       error: "Failed to send OTP email",
@@ -492,7 +475,7 @@ apiRouter.post("/send-password-reset", async (req, res) => {
     <div style="font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 500px; margin: 0 auto; padding: 32px 24px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; color: #1e293b;">
       <div style="text-align: center; margin-bottom: 24px;">
         <h2 style="color: #16a34a; margin: 0; font-size: 26px; font-weight: 800; tracking-tight:-0.025em; font-family: sans-serif;">SmartCart</h2>
-        <p style="color: #64748b; font-size: 14px; margin-top: 6px; margin-bottom: 0; font-weight: 500;">Security Notification: Resend Active Mode</p>
+        <p style="color: #64748b; font-size: 14px; margin-top: 6px; margin-bottom: 0; font-weight: 500;">Security Notification: SMTP Mode</p>
       </div>
       <p style="font-size: 16px; line-height: 24px; color: #334155; margin-top: 0; font-weight: 600;">Hello ${userName || "Customer"},</p>
       <p style="font-size: 14px; line-height: 22px; color: #475569; margin-bottom: 24px;">
@@ -515,16 +498,17 @@ apiRouter.post("/send-password-reset", async (req, res) => {
   const textContent = `SmartCart Password Reset Confirmation\n\nHello ${userName || "Customer"},\n\nThis is to confirm your password has been successfully updated on ${new Date().toLocaleString()}.`;
 
   try {
-    await sendResendEmail({
+    await sendSmtpEmail({
       to: email,
       subject: `[SmartCart] Security Notice: Password Updated Successfully`,
       html: htmlContent,
-      text: textContent
+      text: textContent,
+      from: "SmartCart Security <noreply@smartcartgola.in>"
     });
 
-    return res.json({ success: true, message: "Security notification sent successfully via Resend" });
+    return res.json({ success: true, message: "Security notification sent successfully via SMTP" });
   } catch (error: any) {
-    console.error(`[SmartCart Resend Failure] Error sending password reset email to ${email}:`, error?.message || error);
+    console.error(`[SmartCart SMTP Failure] Error sending password reset email to ${email}:`, error?.message || error);
     return res.json({ success: false, error: "Email sending failed", details: error?.message || String(error) });
   }
 });
@@ -735,7 +719,7 @@ apiRouter.post("/forgot-password-request", async (req, res) => {
     console.log(`Expires:  ${new Date(expiresAt).toISOString()}`);
     console.log(`======================================================\n`);
 
-    // Step 4: Send OTP using Resend
+    // Step 4: Send OTP using SMTP
     const templateTitle = "SmartCart Password Reset OTP";
     const rawBody = `Hello,
 
@@ -786,46 +770,28 @@ For your protection, please do not share this code with anyone. If you did not r
     `;
 
     try {
-      await sendResendEmail({
+      await sendSmtpEmail({
         to: emailKey,
         subject: templateTitle,
         html: htmlContent,
-        text: rawBody
+        text: rawBody,
+        from: "SmartCart Security <noreply@smartcartgola.in>"
       });
 
-      logForgotStep("OTP sent through Resend", emailKey, "SUCCESS", {
+      logForgotStep("OTP sent through SMTP", emailKey, "SUCCESS", {
         functionName: "/forgot-password-request",
-        authMethod: "Resend Email Service",
+        authMethod: "SMTP Email Service",
         recipient: emailKey
       });
 
       console.log(`[SmartCart Forgot Password] Reset OTP successfully sent to "${emailKey}".`);
       return res.json({ success: true, message: "Verification OTP code sent to your email." });
     } catch (sendErr: any) {
-      console.error(`[SmartCart Forgot Password Failure] Resend failed for ${emailKey}:`, sendErr?.message || sendErr);
+      console.error(`[SmartCart Forgot Password Failure] SMTP failed for ${emailKey}:`, sendErr?.message || sendErr);
 
-      // Handle Resend sandbox domain restriction fallback
-      const isSandboxError = sendErr?.message?.includes("testing emails") || sendErr?.message?.includes("resend.com/domains");
-      if (isSandboxError) {
-        logForgotStep("OTP sent through Resend", emailKey, "SUCCESS", {
-          functionName: "/forgot-password-request",
-          authMethod: "Resend Email Service (Sandbox Mode Fallback)",
-          recipient: emailKey,
-          otp: generatedOtp
-        });
-
-        console.warn(`[SmartCart Forgot Password] [SANDBOX] Resend Sandbox mode fallback engaged. OTP: ${generatedOtp}`);
-        return res.json({
-          success: true,
-          message: "OTP generated. Note: Resend is in Sandbox mode. Please retrieve the OTP from server logs.",
-          sandbox: true,
-          otp: generatedOtp // only in sandbox error case for seamless testing
-        });
-      }
-
-      logForgotStep("OTP sent through Resend", emailKey, "FAILURE", {
+      logForgotStep("OTP sent through SMTP", emailKey, "FAILURE", {
         functionName: "/forgot-password-request",
-        authMethod: "Resend Email Service",
+        authMethod: "SMTP Email Service",
         errorMsg: sendErr?.message || String(sendErr),
         stackTrace: sendErr?.stack
       });
@@ -1171,7 +1137,7 @@ apiRouter.post("/forgot-password-reset", async (req, res) => {
     otpMemoryStore.delete(emailKey);
     console.log(`[SmartCart Forgot Password] Securely deleted OTP record from memory cache for "${emailKey}".`);
 
-    // Dispatch safety email to notify password change (Use Resend for password-reset security notification)
+    // Dispatch safety email to notify password change (Use SMTP for password-reset security notification)
     const safetySubject = "[SmartCart] Security Notice: Password Updated Successfully";
     const safetyText = `Hello,\n\nThis email confirms that your SmartCart account security password has been updated successfully.\n\nIf you did not make this change, please contact support immediately.`;
     const safetyHtml = `
@@ -1199,15 +1165,16 @@ apiRouter.post("/forgot-password-reset", async (req, res) => {
     `;
 
     try {
-      await sendResendEmail({
+      await sendSmtpEmail({
         to: emailKey,
         subject: safetySubject,
         html: safetyHtml,
-        text: safetyText
+        text: safetyText,
+        from: "SmartCart Security <noreply@smartcartgola.in>"
       });
       console.log(`[SmartCart Forgot Password] Password change safety notification dispatched to "${emailKey}".`);
     } catch (notifErr: any) {
-      console.warn(`[SmartCart Forgot Password Warning] Failed to dispatch safety notification:`, notifErr?.message || notifErr);
+      console.warn(`[SmartCart Forgot Password Warning] Failed to dispatch safety notification via SMTP:`, notifErr?.message || notifErr);
     }
 
     logForgotStep("Password reset flow complete", emailKey, "SUCCESS", {
