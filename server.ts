@@ -62,17 +62,42 @@ const PORT = 3000;
 app.use(express.json());
 
 // 1. Initialize Firebase Client SDK for secure backend OTP storage
-let firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
-if (!fs.existsSync(firebaseConfigPath)) {
-  firebaseConfigPath = path.join(__dirname, "firebase-applet-config.json");
+// Config is loaded from environment variables (preferred for serverless) with a fallback
+// to the local JSON file for development convenience.
+function loadFirebaseConfig() {
+  // Prefer env vars — required in serverless environments (Netlify, Vercel) where the
+  // firebase-applet-config.json file is not present in the deployed bundle.
+  if (process.env.FIREBASE_PROJECT_ID) {
+    return {
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      appId: process.env.FIREBASE_APP_ID,
+      apiKey: process.env.FIREBASE_API_KEY,
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+      firestoreDatabaseId: process.env.FIREBASE_FIRESTORE_DATABASE_ID || "(default)",
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+      measurementId: process.env.FIREBASE_MEASUREMENT_ID,
+    };
+  }
+
+  // Fallback: read from JSON file for local development
+  const candidates = [
+    path.join(process.cwd(), "firebase-applet-config.json"),
+    path.join(__dirname, "firebase-applet-config.json"),
+    path.join(__dirname, "../..", "firebase-applet-config.json"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, "utf8"));
+    }
+  }
+
+  throw new Error(
+    "[SmartCart] Firebase config not found. Set FIREBASE_PROJECT_ID (and related env vars) in Netlify, " +
+    "or ensure firebase-applet-config.json exists in the project root for local development."
+  );
 }
-if (!fs.existsSync(firebaseConfigPath)) {
-  firebaseConfigPath = path.join(__dirname, "../..", "firebase-applet-config.json");
-}
-if (!fs.existsSync(firebaseConfigPath)) {
-  console.error("[SmartCart Backend Error] firebase-applet-config.json not found in workspace root.");
-}
-const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf8"));
+const firebaseConfig = loadFirebaseConfig();
 const firebaseApp = initializeApp(firebaseConfig);
 const db = firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== "(default)"
   ? getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId)
@@ -321,7 +346,7 @@ For your protection, enter this code on the screen. Any unmatched submission wil
 
 We appreciate your trust and look forward to serving your grocery, household, personal care, snack, pet, and daily essential needs.
 
-Website: https://smartcartgola.netlify.app
+Website: https://smartcartgola.in
 
 Our Team`;
 
