@@ -38,11 +38,11 @@ function logForgotStep(
   console.log(`Status:              ${status}`);
   console.log(`User Email:          ${email}`);
   if (details?.functionName) console.log(`Function Name:       ${details.functionName}`);
-  if (details?.authMethod)   console.log(`Auth Method:         ${details.authMethod}`);
-  if (details?.dbOp)         console.log(`Database Operation:  ${details.dbOp}`);
-  if (details?.errorMsg)     console.log(`Error Message:       ${details.errorMsg}`);
-  if (details?.stackTrace)   console.log(`Stack Trace:\n${details.stackTrace}`);
-  
+  if (details?.authMethod) console.log(`Auth Method:         ${details.authMethod}`);
+  if (details?.dbOp) console.log(`Database Operation:  ${details.dbOp}`);
+  if (details?.errorMsg) console.log(`Error Message:       ${details.errorMsg}`);
+  if (details?.stackTrace) console.log(`Stack Trace:\n${details.stackTrace}`);
+
   const metadata = { ...details };
   delete metadata.functionName;
   delete metadata.authMethod;
@@ -109,6 +109,16 @@ try {
   if (admin.apps.length === 0) {
     admin.initializeApp({
       projectId: firebaseConfig.projectId,
+
+      // Add this block 👇
+      ...(process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY && {
+        credential: admin.credential.cert({
+          projectId: firebaseConfig.projectId,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+        }),
+      }),
+
     });
   }
   adminAuth = admin.auth();
@@ -328,7 +338,7 @@ apiRouter.post("/send-otp", async (req, res) => {
     // STEP 5 Log: Call Resend
     console.log(`[SmartCart OTP Flow] [STEP 5] Call Resend: Dispatching email to "${emailKey}"...`);
     const templateTitle = "SmartCart Verification OTP";
-    
+
     const rawBody = `Welcome to Smart Cart.
 
 Complete account activation using this code shown below. This unique security credential confirms ownership of the registered email address and enables to start shopping, tracking, saved addresses, management, delivery updates, and other platform features.
@@ -466,17 +476,17 @@ Our Team`;
 
     // STEP 6 Log: Success
     console.log(`[SmartCart OTP Flow] [STEP 6] Success: Verification OTP email successfully dispatched via Resend to "${emailKey}".`);
-    return res.json({ 
-      success: true, 
+    return res.json({
+      success: true,
       message: "OTP sent successfully"
     });
 
   } catch (error: any) {
     // STEP 7 Log: Failure
     console.error(`[SmartCart OTP Flow] [STEP 7] [FAILURE] Failed to dispatch OTP for ${emailKey}:`, error?.message || error);
-    
-    return res.json({ 
-      success: false, 
+
+    return res.json({
+      success: false,
       error: "Failed to send OTP email",
       details: error?.message || String(error)
     });
@@ -530,8 +540,8 @@ apiRouter.post("/verify-otp", async (req, res) => {
 
   } catch (error: any) {
     console.error(`[SmartCart OTP Flow] [VERIFY ERROR] Verification failed for ${emailKey}:`, error?.message || error);
-    return res.json({ 
-      success: false, 
+    return res.json({
+      success: false,
       error: "OTP verification failed due to a server error",
       details: error?.message || String(error)
     });
@@ -611,7 +621,7 @@ apiRouter.post("/send-order-confirmation", async (req, res) => {
       `).join('')
     : `<tr><td colspan="3" style="text-align: center; padding: 12px 0;">No active items found</td></tr>`;
 
-  const promoSection = order.discount > 0 
+  const promoSection = order.discount > 0
     ? `<div style="display: flex; justify-content: space-between; margin-bottom: 8px; color: #16a34a; font-weight: 600;">
          <span>Promo Code Discount:</span>
          <span>-₹${order.discount}</span>
@@ -960,8 +970,8 @@ apiRouter.post("/forgot-password-verify", async (req, res) => {
         attemptsLeft: 5 - data.attempts
       });
       console.error(`[SmartCart Forgot Password] [VERIFY FAILURE] Incorrect code entered: "${enteredOtp}" (expected: "${data.otp}"). Attempts left: ${5 - data.attempts}`);
-      return res.json({ 
-        success: false, 
+      return res.json({
+        success: false,
         error: "Invalid verification code.",
         attemptsLeft: 5 - data.attempts
       });
@@ -1083,7 +1093,7 @@ apiRouter.post("/forgot-password-reset", async (req, res) => {
       try {
         // Fetch user UID from Firebase Auth using email
         const userRecord = await adminAuth.getUserByEmail(emailKey);
-        
+
         // Update password in Firebase Auth securely
         await adminAuth.updateUser(userRecord.uid, { password: newPassword });
         console.log(`[SmartCart Forgot Password] Successfully updated password for user UID: ${userRecord.uid} via Admin SDK.`);
@@ -1122,7 +1132,7 @@ apiRouter.post("/forgot-password-reset", async (req, res) => {
     } else {
       console.log(`[SmartCart Forgot Password Fallback] Standard Firebase Auth update was not completed. Proceeding with hashed customPassword update.`);
       const hashedPassword = hashPassword(newPassword);
-      
+
       if (matchedProfileId) {
         try {
           await updateDoc(doc(db, "profiles", matchedProfileId), {
@@ -1130,7 +1140,7 @@ apiRouter.post("/forgot-password-reset", async (req, res) => {
             updatedAt: new Date().toISOString()
           });
           console.log(`[SmartCart Forgot Password Fallback] Securely updated customPassword in Firestore profiles for "${emailKey}".`);
-          
+
           logForgotStep("Password updated", emailKey, "SUCCESS", {
             functionName: "/forgot-password-reset",
             authMethod: "Custom Database Fallback (Firestore Profiles)",
@@ -1240,8 +1250,8 @@ apiRouter.post("/forgot-password-reset", async (req, res) => {
       stackTrace: error?.stack
     });
     console.error(`[SmartCart Forgot Password Reset Error]`, error);
-    return res.json({ 
-      success: false, 
+    return res.json({
+      success: false,
       error: "Failed to reset password due to an authentication server error.",
       details: error?.message || String(error)
     });
